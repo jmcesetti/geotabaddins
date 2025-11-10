@@ -1,46 +1,34 @@
-geotab.addin.tripExporter = function (api, state) {
-    return {
-        initialize: function (api, state, callback) {
-            callback();
-        },
-        focus: function (api, state) {},
-        blur: function (api, state) {},
-        click: async function () {
-            try {
-                // Obtener los viajes seleccionados
-                const selectedTrips = state.getSelected ? state.getSelected() : state.data || [];
-
-                if (!selectedTrips || !selectedTrips.length) {
-                    alert("Por favor selecciona al menos un viaje.");
-                    return;
-                }
-
-                // Crear datos para exportar
-                const data = selectedTrips.map(t => ({
-                    Vehículo: t.device?.name || "",
-                    Conductor: t.driver?.name || "",
-                    Inicio: new Date(t.start).toLocaleString(),
-                    Fin: new Date(t.stop).toLocaleString(),
-                    "Duración (min)": Math.round((new Date(t.stop) - new Date(t.start)) / 60000),
-                    "Distancia (km)": (t.distance / 1000).toFixed(2)
-                }));
-
-                // Convertir a CSV
-                const headers = Object.keys(data[0]).join(",");
-                const rows = data.map(row => Object.values(row).join(","));
-                const csvContent = [headers, ...rows].join("\n");
-
-                // Descargar CSV
-                const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-                const link = document.createElement("a");
-                link.href = URL.createObjectURL(blob);
-                link.download = "trips_history.csv";
-                link.click();
-
-            } catch (error) {
-                console.error("Error al exportar viajes:", error);
-                alert("Ocurrió un error al exportar los viajes.");
+button.onclick = async function () {
+    try {
+        const result = await api.call("Get", {
+            typeName: "Trip",
+            resultsLimit: 100,
+            search: {
+                fromDate: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+                toDate: new Date().toISOString()
             }
+        });
+        const trips = result || [];
+        if (!trips.length) {
+            alert("No trips found.");
+            return;
         }
-    };
+
+        const data = trips.map(t => ({
+            Vehicle: t.device?.name || "",
+            Driver: t.driver?.name || "",
+            Start: new Date(t.start).toLocaleString(),
+            End: new Date(t.stop).toLocaleString(),
+            DurationMinutes: Math.round((new Date(t.stop) - new Date(t.start)) / 60000),
+            DistanceKm: (t.distance / 1000).toFixed(2)
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Trips");
+        XLSX.writeFile(wb, "trip_history.xlsx");
+    } catch (err) {
+        console.error(err);
+        alert("Error exporting trips.");
+    }
 };
