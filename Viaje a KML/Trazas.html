@@ -4,10 +4,6 @@
   <meta charset="UTF-8">
   <title>Exportar Viaje como KML</title>
 
-  <!-- ✅ CSS externo desde GitHub RAW -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jmcesetti/geotabaddins/Viaje%20a%20KML/Style.css">
-
-
   <!-- Librerías -->
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
   <script src="https://unpkg.com/tokml/tokml.js"></script>
@@ -37,6 +33,120 @@
 
   <script>
     (function() {
+      // === Inyectar estilos solo dentro del add-in ===
+      const container = document.getElementById("exportKML");
+      const style = document.createElement("style");
+      style.textContent = `
+        #exportKML {
+          font-family: "Segoe UI", Roboto, Arial, sans-serif;
+          background: transparent;
+          color: #333;
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          padding: 20px;
+        }
+
+        #exportKML .container {
+          background: #fff;
+          padding: 30px 40px;
+          border-radius: 16px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          width: 100%;
+          max-width: 500px;
+        }
+
+        #exportKML h2 {
+          text-align: center;
+          color: #1a73e8;
+          margin-bottom: 25px;
+          font-weight: 600;
+        }
+
+        #exportKML label {
+          display: block;
+          margin-top: 15px;
+          font-weight: 500;
+        }
+
+        #exportKML input,
+        #exportKML select {
+          width: 100%;
+          padding: 10px;
+          margin-top: 6px;
+          border: 1px solid #d0d7de;
+          border-radius: 8px;
+          font-size: 15px;
+          transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        #exportKML input:focus,
+        #exportKML select:focus {
+          outline: none;
+          border-color: #1a73e8;
+          box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.2);
+        }
+
+        #exportKML button {
+          width: 100%;
+          margin-top: 25px;
+          background: #1a73e8;
+          color: white;
+          padding: 12px;
+          border: none;
+          border-radius: 8px;
+          font-size: 16px;
+          cursor: pointer;
+          transition: background 0.25s, transform 0.1s;
+        }
+
+        #exportKML button:hover {
+          background: #155fc4;
+        }
+
+        #exportKML button:active {
+          transform: scale(0.98);
+        }
+
+        #exportKML #log {
+          margin-top: 25px;
+          background: #f9fafc;
+          border: 1px solid #e0e0e0;
+          border-radius: 10px;
+          padding: 15px;
+          font-family: "Courier New", monospace;
+          font-size: 13px;
+          color: #333;
+          white-space: pre-wrap;
+          max-height: 250px;
+          overflow-y: auto;
+          line-height: 1.5;
+        }
+
+        #exportKML #log::-webkit-scrollbar {
+          width: 8px;
+        }
+        #exportKML #log::-webkit-scrollbar-thumb {
+          background-color: #c0c0c0;
+          border-radius: 10px;
+        }
+        #exportKML #log::-webkit-scrollbar-thumb:hover {
+          background-color: #999;
+        }
+
+        @media (max-width: 600px) {
+          #exportKML .container {
+            margin: 10px;
+            padding: 20px;
+          }
+          #exportKML h2 {
+            font-size: 20px;
+          }
+        }
+      `;
+      container.prepend(style);
+
+      // === Código funcional del Add-in ===
       var api = null;
       var state = null;
       var logBox = document.getElementById('log');
@@ -143,5 +253,3 @@
   </script>
 </body>
 </html>
-
-
