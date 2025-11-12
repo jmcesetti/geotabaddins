@@ -10,5 +10,9 @@
             "icon": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/Viaje%20a%20KML/icon.svg"
         }
     ],
+    "files": {
+        "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/Viaje%20a%20KML/exporter.js",
+        "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/Viaje%20a%20KML/Style.css"
+    },
     "isSigned": false
 }
