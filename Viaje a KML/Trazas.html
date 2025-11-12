@@ -3,49 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <title>Exportar Viaje como KML</title>
+  <link rel="stylesheet" href="style.css">
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
   <script src="https://unpkg.com/tokml/tokml.js"></script>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-    }
-    label {
-      display: block;
-      margin-top: 10px;
-    }
-    input, select, button {
-      margin-top: 5px;
-      padding: 5px;
-    }
-    #log {
-      margin-top: 20px;
-      white-space: pre-wrap;
-      background: #f5f5f5;
-      padding: 10px;
-      border-radius: 6px;
-      border: 1px solid #ccc;
-    }
-  </style>
 </head>
 <body>
-  <h2>Exportar viaje a KML</h2>
+  <div class="container">
+    <h2>Exportar viaje a KML</h2>
 
-  <label>Dispositivo:</label>
-  <select id="deviceSelect"></select>
+    <label>Dispositivo:</label>
+    <select id="deviceSelect"></select>
 
-  <label>Fecha inicio:</label>
-  <input type="datetime-local" id="fromDate">
+    <label>Fecha inicio:</label>
+    <input type="datetime-local" id="fromDate">
 
-  <label>Fecha fin:</label>
-  <input type="datetime-local" id="toDate">
+    <label>Fecha fin:</label>
+    <input type="datetime-local" id="toDate">
 
-  <label>Nombre de archivo:</label>
-  <input type="text" id="filename" value="TRAZA">
+    <label>Nombre de archivo:</label>
+    <input type="text" id="filename" value="TRAZA">
 
-  <button id="generate">Generar KML</button>
+    <button id="generate">Generar KML</button>
 
-  <pre id="log"></pre>
+    <pre id="log"></pre>
+  </div>
 
   <script>
     (function() {
@@ -55,6 +36,7 @@
 
       function log(msg) {
         logBox.textContent += msg + '\n';
+        logBox.scrollTop = logBox.scrollHeight;
       }
 
       function loadDevices() {
@@ -136,7 +118,6 @@
         });
       });
 
-      // Inicializador del Add-in
       geotab.addin.exportKML = function(api_, state_) {
         api = api_;
         state = state_;
