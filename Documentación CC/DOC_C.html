@@ -8,9 +8,10 @@
     <style>
         body {
             margin: 0;
+            padding: 0;
+            height: 100vh;
             font-family: Arial, sans-serif;
             display: flex;
-            height: 100vh;
             overflow: hidden;
         }
         #leftPanel, #rightPanel {
@@ -28,15 +29,16 @@
         .inputRow {
             margin-bottom: 12px;
         }
-        select, input, button {
+        input, select, button {
             width: 100%;
             padding: 8px;
             box-sizing: border-box;
         }
         .docItem {
             padding: 10px;
-            border: 1px solid #ddd;
+            border: 1px solid #ccc;
             margin-bottom: 8px;
+            border-radius: 4px;
         }
         .expired {
             background: #ffb3b3;
@@ -45,12 +47,13 @@
             background: #ffe6b3;
         }
         #log {
-            margin-top: 12px;
+            height: 120px;
             background: #f4f4f4;
             border: 1px solid #ccc;
-            height: 120px;
+            margin-top: 10px;
             overflow-y: auto;
             padding: 8px;
+            white-space: pre-wrap;
         }
     </style>
 </head>
@@ -109,7 +112,9 @@
                     o.textContent = r[i].name;
                     s.appendChild(o);
                 }
-            }, function(e) { log("Error usuarios: " + e); });
+            }, function(e) {
+                log("Error usuarios: " + e);
+            });
         }
 
         function renderStoredDocs() {
