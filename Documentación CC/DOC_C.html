@@ -1,57 +1,149 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8" />
-<title>Documentación Conductores</title>
-<style>
-body { font-family: Arial; margin: 0; padding: 0; }
-.container { display: flex; height: 100vh; }
-.left, .right { flex: 1; padding: 15px; overflow-y: auto; }
-.left { border-right: 1px solid #ccc; }
-table { width: 100%; border-collapse: collapse; }
-th, td { border: 1px solid #ccc; padding: 6px; }
-#log { height: 120px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #ccc; padding: 5px; margin-top: 10px; }
-</style>
+    <meta charset="UTF-8">
+    <title>Documentación de Conductores</title>
+    <script src="https://cdn.jsdelivr.net/npm/litepicker/dist/litepicker.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/litepicker/dist/css/litepicker.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+        }
+        #leftPanel, #rightPanel {
+            width: 50%;
+            padding: 20px;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+        #leftPanel {
+            border-right: 1px solid #ccc;
+        }
+        h2 {
+            margin-top: 0;
+        }
+        .inputRow {
+            margin-bottom: 12px;
+        }
+        select, input {
+            width: 100%;
+            padding: 6px;
+            box-sizing: border-box;
+        }
+        #uploadExcel {
+            width: 100%;
+            padding: 10px;
+        }
+        #log {
+            width: 100%;
+            height: 100px;
+            margin-top: 10px;
+            overflow-y: auto;
+            background: #f4f4f4;
+            border: 1px solid #ccc;
+        }
+    </style>
 </head>
+
 <body>
-<div class="container">
-<div class="left">
-<h2>Documentación por vencer</h2>
-<table id="docTable">
-<thead><tr><th>Conductor</th><th>Documento</th><th>Vence</th></tr></thead>
-<tbody></tbody>
-</table>
-<div id="log"></div>
-</div>
-<div class="right">
-<h2>Asignar documento</h2>
-<label>Conductor</label><br>
-<select id="userSelect"></select><br><br>
-<label>Documento</label><br>
-<input id="docName" type="text"><br><br>
-<label>Vencimiento</label><br>
-<input id="expiryDate" type="date"><br><br>
-<button id="saveBtn">Guardar</button>
-<hr>
-<h3>Carga masiva</h3>
-<input id="excelFile" type="file" accept=".xlsx,.xls" style="display:none">
-<button id="uploadBtn">Subir Excel</button>
-</div>
-</div>
-<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-<script>
-(function(){
-var api=null; var state=null; var logBox=null; var addInId=null;
-function log(t){ logBox.textContent+=t+"\n"; logBox.scrollTop=logBox.scrollHeight; }
-function loadUsers(){ log("Cargando usuarios..."); api.call("Get",{typeName:"User"},function(r){ var s=document.getElementById("userSelect"); s.innerHTML=""; r.forEach(function(u){ var o=document.createElement("option"); o.value=u.id; o.textContent=u.name||u.id; s.appendChild(o); }); log("Usuarios cargados: "+r.length); },function(e){ log("Error usuarios: "+e); }); }
-function loadDocuments(){ log("Cargando documentos..."); api.call("Get",{typeName:"AddInData",search:{addInId:addInId}},function(r){ var tb=document.querySelector("#docTable tbody"); tb.innerHTML=""; r.forEach(function(it){ var d=it.details||{}; var uid=d.userId; var docs=d.documents||[]; docs.forEach(function(dc){ var tr=document.createElement("tr"); var td1=document.createElement("td"); var td2=document.createElement("td"); var td3=document.createElement("td"); td1.textContent=uid; td2.textContent=dc.type; td3.textContent=dc.expiryDate; tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tb.appendChild(tr); }); }); log("Documentos cargados"); },function(e){ log("Error doc: "+e); }); }
-function saveDocument(){ var uid=document.getElementById("userSelect").value; var dn=document.getElementById("docName").value; var ex=document.getElementById("expiryDate").value; var data={userId:uid,documents:[{type:dn,expiryDate:ex}]}; api.call("Add",{typeName:"AddInData",entity:{addInId:addInId,details:data}},function(){ log("Guardado"); loadDocuments(); },function(e){ log("Error guardado: "+e); }); }
-function uploadExcel(e){ var f=e.target.files[0]; if(!f)return; var fr=new FileReader(); fr.onload=function(){ var wb=XLSX.read(fr.result,{type:"binary"}); var ws=wb.Sheets[wb.SheetNames[0]]; var j=XLSX.utils.sheet_to_json(ws,{header:1}); var p=Promise.resolve(); for(var i=1;i<j.length;i++){ (function(row){ var uid=row[0]; var dn=row[1]; var ex=row[2]; if(!uid||!dn||!ex)return; var data={userId:uid,documents:[{type:dn,expiryDate:ex}]}; p=p.then(function(){ return new Promise(function(res){ api.call("Add",{typeName:"AddInData",entity:{addInId:addInId,details:data}},function(){res();},function(){res();}); }); }); })(j[i]); }
- p.then(function(){ log("Excel procesado"); loadDocuments(); }); };
- fr.readAsBinaryString(f);
-}
-window.geotab.addin.docVencimientos=function(elt,_api,_state){ api=_api; state=_state; addInId=_state.addInId; logBox=document.getElementById("log"); loadUsers(); loadDocuments(); document.getElementById("saveBtn").onclick=saveDocument; document.getElementById("uploadBtn").onclick=function(){ document.getElementById("excelFile").click(); }; document.getElementById("excelFile").onchange=uploadExcel; };
-})();
-</script>
+    <div id="leftPanel">
+        <h2>Documentación vencida o próxima a vencer</h2>
+        <div id="alertList"></div>
+    </div>
+
+    <div id="rightPanel">
+        <h2>Gestión de Documentación</h2>
+
+        <div class="inputRow">
+            <label>Seleccionar conductor:</label>
+            <select id="userSelect"></select>
+        </div>
+
+        <div class="inputRow">
+            <label>Nombre del documento:</label>
+            <input type="text" id="docName">
+        </div>
+
+        <div class="inputRow">
+            <label>Fecha de vencimiento:</label>
+            <input type="text" id="docDate">
+        </div>
+
+        <button id="saveDoc">Guardar documento</button>
+
+        <h3>Carga Masiva desde Excel</h3>
+        <input type="file" id="excelFile">
+        <button id="uploadExcel">Cargar Excel</button>
+
+        <pre id="log"></pre>
+    </div>
+
+    <script>
+        var api = null;
+        var state = null;
+
+        function log(msg) {
+            var box = document.getElementById('log');
+            box.textContent += msg + "\n";
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function loadUsers() {
+            api.call("Get", { typeName: "User" }, function(result) {
+                var select = document.getElementById("userSelect");
+                select.innerHTML = "";
+                for (var i = 0; i < result.length; i++) {
+                    var opt = document.createElement("option");
+                    opt.value = result[i].id;
+                    opt.textContent = result[i].name;
+                    select.appendChild(opt);
+                }
+            }, function(e) {
+                log("Error cargando usuarios: " + e);
+            });
+        }
+
+        function loadAlerts() {
+            var container = document.getElementById("alertList");
+            container.innerHTML = "";
+            var div = document.createElement("div");
+            div.textContent = "Aquí se mostrarán los vencimientos detectados.";
+            container.appendChild(div);
+        }
+
+        function saveDocument() {
+            var userId = document.getElementById("userSelect").value;
+            var docName = document.getElementById("docName").value;
+            var date = document.getElementById("docDate").value;
+            log("Guardado: " + userId + " / " + docName + " / " + date);
+        }
+
+        document.getElementById("saveDoc").onclick = saveDocument;
+
+        new Litepicker({
+            element: document.getElementById('docDate'),
+            format: 'YYYY-MM-DD'
+        });
+
+        geotab.addin.driverDocs = function(api_, state_) {
+            api = api_;
+            state = state_;
+
+            return {
+                initialize: function(api, state, callback) {
+                    log("Add-in inicializado");
+                    loadUsers();
+                    loadAlerts();
+                    callback();
+                },
+                focus: function(api, state) {},
+                blur: function() {}
+            };
+        };
+    </script>
+
 </body>
 </html>
