@@ -1,371 +1,136 @@
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
-    <meta charset="UTF-8" />
-    <title>Documentación de Conductores</title>
+    <meta charset="UTF-8">
+    <title>Documentos</title>
     <style>
         body {
-            margin: 0;
-            padding: 0;
-            height: 100vh;
-            font-family: Arial, sans-serif;
-            display: flex;
-            overflow: hidden;
-        }
-        #leftPanel, #rightPanel {
-            width: 50%;
+            font-family: Arial;
             padding: 20px;
-            box-sizing: border-box;
-            overflow-y: auto;
         }
-        #leftPanel {
-            border-right: 1px solid #ccc;
+        .inputBox {
+            margin-bottom: 20px;
         }
-        h2 {
-            margin-top: 0;
+        label {
+            display: block;
+            margin-bottom: 4px;
         }
-        .inputRow {
-            margin-bottom: 12px;
-        }
-        input, select, button {
-            width: 100%;
+        input[type=text], input[type=date] {
+            width: 250px;
             padding: 8px;
-            box-sizing: border-box;
-        }
-        .docItem {
-            padding: 10px;
             border: 1px solid #ccc;
-            margin-bottom: 8px;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            border-radius: 6px;
         }
-        .docItem .left {
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            max-width: 70%;
-        }
-        .docItem .right {
-            text-align: right;
-            min-width: 160px;
-        }
-        .expired {
-            background: #ffb3b3;
-        }
-        .soon {
-            background: #ffe6b3;
-        }
-        .groupTitle {
-            font-weight: bold;
-            margin-top: 12px;
-            margin-bottom: 6px;
-        }
-        #log {
-            height: 120px;
-            background: #f4f4f4;
-            border: 1px solid #ccc;
-            margin-top: 10px;
-            overflow-y: auto;
-            padding: 8px;
-            white-space: pre-wrap;
-        }
-        .small {
-            font-size: 12px;
-            color: #555;
-        }
-        .actionBtn {
-            padding: 6px 8px;
+        button {
+            padding: 10px 16px;
+            background: #0084ff;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
             cursor: pointer;
+        }
+        #msg {
+            margin-top: 20px;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
-    <div id="leftPanel">
-        <h2>Documentación almacenada</h2>
-        <div id="storedDocs"></div>
+    <h2>Documentos del Usuario</h2>
+
+    <div class="inputBox">
+        <label>Documento</label>
+        <input id="docName" type="text">
     </div>
 
-    <div id="rightPanel">
-        <h2>Cargar documentación</h2>
-
-        <div class="inputRow">
-            <label>Conductor</label>
-            <select id="userSelect"></select>
-        </div>
-
-        <div class="inputRow">
-            <label>Documento</label>
-            <input type="text" id="docName" />
-        </div>
-
-        <div class="inputRow">
-            <label>Fecha de vencimiento</label>
-            <input type="date" id="docDate" />
-        </div>
-
-        <button id="saveDoc" class="actionBtn">Guardar</button>
-
-        <h3 style="margin-top:18px">Carga masiva (CSV)</h3>
-        <div class="small">Formato CSV: userId,documentName,yyyy-mm-dd</div>
-        <input type="file" id="bulkFile" accept=".csv" />
-        <button id="uploadBulk" class="actionBtn">Procesar CSV</button>
-
-        <div id="log"></div>
+    <div class="inputBox">
+        <label>Vencimiento</label>
+        <input id="docDate" type="date">
     </div>
+
+    <button id="btnSave">Guardar</button>
+
+    <div id="msg"></div>
 
     <script>
-        var api = null;
-        var state = null;
-        var addInId = null;
-        var dataPrefix = "docs_";
+        var api;
+        var currentUserId;
 
-        function log(msg) {
-            var b = document.getElementById("log");
-            b.textContent += msg + "\n";
-            b.scrollTop = b.scrollHeight;
-        }
-
-        function loadUsers(callback) {
-            api.call("Get", { typeName: "User" }, function(result) {
-                var sel = document.getElementById("userSelect");
-                sel.innerHTML = "";
-                for (var i = 0; i < result.length; i++) {
-                    var u = result[i];
-                    var opt = document.createElement("option");
-                    opt.value = u.id;
-                    opt.textContent = u.name || ((u.firstName || "") + " " + (u.lastName || "")).trim();
-                    sel.appendChild(opt);
+        function loadExisting(addInId, callback) {
+            api.call("Get", {
+                typeName: "AddInData",
+                search: { addInId: addInId }
+            }, function(result) {
+                if (result && result.length > 0) {
+                    callback(result[0]);
+                } else {
+                    callback(null);
                 }
-                if (typeof callback === "function") callback();
-            }, function(err) {
-                log("Error cargando usuarios: " + JSON.stringify(err));
-                if (typeof callback === "function") callback();
+            }, function() {
+                callback(null);
             });
-        }
-
-        function loadAllDocuments(callback) {
-            api.call("Get", { typeName: "AddInData", search: { addInId: addInId } }, function(result) {
-                var all = {};
-                for (var i = 0; i < result.length; i++) {
-                    var row = result[i];
-                    var details = row.details || {};
-                    if (details.userId && Array.isArray(details.documents)) {
-                        all[details.userId] = all[details.userId] || [];
-                        for (var j = 0; j < details.documents.length; j++) {
-                            var d = details.documents[j];
-                            all[details.userId].push({
-                                id: row.id,
-                                nombre: d.nombre,
-                                vence: d.vence
-                            });
-                        }
-                    }
-                }
-                renderStoredDocs(all);
-                if (typeof callback === "function") callback(all);
-            }, function(err) {
-                log("Error leyendo AddInData: " + JSON.stringify(err));
-                renderStoredDocs({});
-                if (typeof callback === "function") callback({});
-            });
-        }
-
-        function renderStoredDocs(store) {
-            var box = document.getElementById("storedDocs");
-            box.innerHTML = "";
-            var now = new Date();
-            var userIds = Object.keys(store).sort();
-            if (userIds.length === 0) {
-                var e = document.createElement("div");
-                e.className = "small";
-                e.textContent = "No hay documentos almacenados.";
-                box.appendChild(e);
-                return;
-            }
-            for (var i = 0; i < userIds.length; i++) {
-                var uid = userIds[i];
-                var docs = store[uid] || [];
-                var title = document.createElement("div");
-                title.className = "groupTitle";
-                title.textContent = uid;
-                box.appendChild(title);
-                for (var k = 0; k < docs.length; k++) {
-                    (function(doc){
-                        var item = document.createElement("div");
-                        var exp = new Date(doc.vence);
-                        var diff = (exp - now) / (1000 * 60 * 60 * 24);
-                        if (isNaN(exp.getTime())) diff = 99999;
-                        if (diff < 0) item.className = "docItem expired";
-                        else if (diff <= 7) item.className = "docItem soon";
-                        else item.className = "docItem";
-                        var left = document.createElement("div");
-                        left.className = "left";
-                        left.textContent = doc.nombre + " ";
-                        var small = document.createElement("span");
-                        small.className = "small";
-                        small.textContent = "(" + (doc.vence || "") + ")";
-                        left.appendChild(small);
-                        var right = document.createElement("div");
-                        right.className = "right";
-                        var btnDel = document.createElement("button");
-                        btnDel.className = "actionBtn";
-                        btnDel.textContent = "Eliminar";
-                        btnDel.onclick = function() {
-                            removeAddInDataEntry(doc.id, function(ok) {
-                                if (ok) {
-                                    log("Entrada eliminada");
-                                    loadAllDocuments();
-                                } else {
-                                    log("Error eliminando entrada");
-                                }
-                            });
-                        };
-                        right.textContent = humanizeDiff(diff);
-                        right.appendChild(btnDel);
-                        item.appendChild(left);
-                        item.appendChild(right);
-                        box.appendChild(item);
-                    })(docs[k]);
-                }
-            }
-        }
-
-        function humanizeDiff(days) {
-            if (days === 99999) return "Fecha inválida";
-            if (days < 0) return "Vencido";
-            return "Vence en " + Math.ceil(days) + " días";
         }
 
         function saveDocument() {
-            var userId = document.getElementById("userSelect").value;
-            var nombre = document.getElementById("docName").value.trim();
+            var name = document.getElementById("docName").value;
             var vence = document.getElementById("docDate").value;
-            if (!userId || !nombre || !vence) {
-                log("Faltan datos para guardar");
+            if (!name || ! vence) {
+                document.getElementById("msg").innerText = "Falta completar datos";
                 return;
             }
-            var details = {
-                userId: userId,
-                documents: [
-                    { nombre: nombre, vence: vence }
-                ]
-            };
-            api.call("Add", { typeName: "AddInData", entity: { addInId: addInId, details: details } }, function(res) {
-                log("Documento guardado");
-                loadAllDocuments();
-                clearForm();
-            }, function(err) {
-                log("Error guardando AddInData: " + JSON.stringify(err));
-            });
-        }
 
-        function removeAddInDataEntry(addInDataId, callback) {
-            api.call("Remove", { typeName: "AddInData", id: addInDataId }, function() {
-                callback(true);
-            }, function() {
-                callback(false);
-            });
-        }
-
-        function processCSVFile(file) {
-            var reader = new FileReader();
-            reader.onload = function(e) {
-                var text = e.target.result;
-                var lines = text.split(/\r\n|\n/);
-                var processed = 0;
-                var errors = 0;
-                var chain = Promise.resolve();
-                for (var i = 0; i < lines.length; i++) {
-                    (function(line){
-                        chain = chain.then(function(){
-                            return new Promise(function(res){
-                                var trimmed = line.trim();
-                                if (!trimmed) { res(); return; }
-                                var cols = parseCSVLine(trimmed);
-                                if (cols.length < 3) { errors++; res(); return; }
-                                var userId = cols[0].trim();
-                                var nombre = cols[1].trim();
-                                var vence = cols[2].trim();
-                                if (!userId || !nombre || !vence) { errors++; res(); return; }
-                                var details = { userId: userId, documents: [{ nombre: nombre, vence: vence }] };
-                                api.call("Add", { typeName: "AddInData", entity: { addInId: addInId, details: details } }, function() {
-                                    processed++;
-                                    res();
-                                }, function() {
-                                    errors++;
-                                    res();
-                                });
-                            });
-                        });
-                    })(lines[i]);
-                }
-                chain.then(function(){
-                    log("CSV procesado. Registros: " + processed + ", Errores: " + errors);
-                    loadAllDocuments();
-                });
-            };
-            reader.readAsText(file, "UTF-8");
-        }
-
-        function parseCSVLine(line) {
-            var res = [];
-            var curr = "";
-            var inQuotes = false;
-            for (var i = 0; i < line.length; i++) {
-                var ch = line[i];
-                if (ch === '"' ) {
-                    if (inQuotes && i + 1 < line.length && line[i + 1] === '"') {
-                        curr += '"';
-                        i++;
-                    } else {
-                        inQuotes = !inQuotes;
-                    }
-                } else if (ch === ',' && !inQuotes) {
-                    res.push(curr);
-                    curr = "";
-                } else {
-                    curr += ch;
-                }
-            }
-            res.push(curr);
-            return res;
-        }
-
-        function clearForm() {
-            document.getElementById("docName").value = "";
-            document.getElementById("docDate").value = "";
-        }
-
-        function removeAddInDataByIdIfExists(id, callback) {
-            api.call("Remove", { typeName: "AddInData", id: id }, function() {
-                callback(true);
-            }, function() {
-                callback(false);
-            });
-        }
-
-        window.geotab.addin.driverDocs = function(api_, state_) {
-            api = api_;
-            state = state_;
-            addInId = state.addInId || null;
-            return {
-                initialize: function(apiInner, stateInner, callback) {
-                    loadUsers(function() {
-                        loadAllDocuments(function() {
-                            document.getElementById("saveDoc").onclick = saveDocument;
-                            document.getElementById("uploadBulk").onclick = function() {
-                                var f = document.getElementById("bulkFile").files[0];
-                                if (!f) { log("Seleccione un archivo CSV"); return; }
-                                processCSVFile(f);
-                            };
-                            callback();
-                        });
+            var addInId = "DOC_" + currentUserId;
+            loadExisting(addInId, function(existing) {
+                if (existing) {
+                    if (!existing.details) existing.details = {};
+                    if (!existing.details.documents) existing.details.documents = [];
+                    existing.details.documents.push({
+                        nombre: name,
+                        vence: vence
                     });
-                },
-                focus: function(apiInner, stateInner) {},
-                blur: function() {}
+                    api.call("Set", {
+                        typeName: "AddInData",
+                        entity: existing
+                    }, function() {
+                        document.getElementById("msg").innerText = "Actualizado";
+                    }, function(e) {
+                        document.getElementById("msg").innerText = "Error: " + JSON.stringify(e);
+                    });
+                } else {
+                    var entity = {
+                        addInId: addInId,
+                        details: {
+                            userId: currentUserId,
+                            documents: [
+                                {
+                                    nombre: name,
+                                    vence: vence
+                                }
+                            ]
+                        }
+                    };
+                    api.call("Add", {
+                        typeName: "AddInData",
+                        entity: entity
+                    }, function() {
+                        document.getElementById("msg").innerText = "Guardado";
+                    }, function(e) {
+                        document.getElementById("msg").innerText = "Error: " + JSON.stringify(e);
+                    });
+                }
+            });
+        }
+
+        document.getElementById("btnSave").addEventListener("click", saveDocument);
+
+        geotab.addin.documentos = function(apiRef, state) {
+            api = apiRef;
+            api.getSession(function(s) {
+                currentUserId = s.userName;
+            });
+            return {
+                initialize: function(apiRef, state) {},
+                draw: function(apiRef, state) {}
             };
         };
     </script>
