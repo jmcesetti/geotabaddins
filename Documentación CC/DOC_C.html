@@ -93,6 +93,7 @@
         var api = null;
         var state = null;
         var localStore = {};
+        var dataStoreKey = "driverDocsData";
 
         function log(t) {
             var b = document.getElementById('log');
@@ -112,6 +113,35 @@
                 }
             }, function(e) {
                 log("Error usuarios: " + e);
+            });
+        }
+
+        function loadFromDataStore(callback) {
+            api.call("Get", { typeName: "DataStore", search: { key: dataStoreKey } }, function(r) {
+                if (r.length > 0) {
+                    localStore = JSON.parse(r[0].value);
+                    log("Datos cargados de DataStore");
+                } else {
+                    localStore = {};
+                    log("DataStore vacío, inicializando");
+                }
+                callback();
+            }, function() {
+                localStore = {};
+                callback();
+            });
+        }
+
+        function saveToDataStore() {
+            var payload = JSON.stringify(localStore);
+            api.call("Add", { typeName: "DataStore", entity: { key: dataStoreKey, value: payload } }, function() {
+                log("Datos guardados permanentemente");
+            }, function(e) {
+                api.call("Set", { typeName: "DataStore", entity: { key: dataStoreKey, value: payload } }, function() {
+                    log("Datos actualizados permanentemente");
+                }, function(err) {
+                    log("Error guardando: " + err);
+                });
             });
         }
 
@@ -151,6 +181,7 @@
             });
 
             renderStoredDocs();
+            saveToDataStore();
             log("Guardado: " + userName + " / " + docName + " / " + date);
         }
 
@@ -163,8 +194,10 @@
             return {
                 initialize: function(api, state, callback) {
                     loadUsers();
-                    renderStoredDocs();
-                    callback();
+                    loadFromDataStore(function() {
+                        renderStoredDocs();
+                        callback();
+                    });
                 },
                 focus: function(api, state) {},
                 blur: function() {}
