@@ -443,24 +443,24 @@
                 state = state_;
                 return {
                     initialize: function(api, state, callback) {
-						loadUsers();
-						callback();
-                        // loadUsers(function() {
-                        //     loadAllAddInData(function() {
-                        //         document.getElementById("btnSave").addEventListener("click", saveDocument);
-                        //         document.getElementById("btnBulk").addEventListener("click", function() {
-                        //             var f = document.getElementById("bulkFile").files[0];
-                        //             if (!f) { log("Seleccione un CSV"); return; }
-                        //             processCSV(f);
-                        //         });
-                        //         document.getElementById("userSelect").addEventListener("change", function() {
-                        //             var selected = this.value;
-                        //             var name = this.options[this.selectedIndex] && this.options[this.selectedIndex].text;
-                        //             log("Usuario seleccionado: " + (name || selected));
-                        //         });
-                        //         callback();
-                        //     });
-                        // });
+						// loadUsers();
+						// callback();
+                        loadUsers(function() {
+                            loadAllAddInData(function() {
+                                document.getElementById("btnSave").addEventListener("click", saveDocument);
+                                document.getElementById("btnBulk").addEventListener("click", function() {
+                                    var f = document.getElementById("bulkFile").files[0];
+                                    if (!f) { log("Seleccione un CSV"); return; }
+                                    processCSV(f);
+                                });
+                                document.getElementById("userSelect").addEventListener("change", function() {
+                                    var selected = this.value;
+                                    var name = this.options[this.selectedIndex] && this.options[this.selectedIndex].text;
+                                    log("Usuario seleccionado: " + (name || selected));
+                                });
+                                callback();
+                            });
+                        });
                     },
                     focus: function(api, state) {},
                     blur: function() {}
