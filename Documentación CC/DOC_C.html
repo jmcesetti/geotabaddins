@@ -1,167 +1,176 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Documentación Conductores</title>
-  <style>
-    /* estilo simple para dividir pantalla */
-    .container { display: flex; }
-    .left, .right { flex: 1; padding: 10px; }
-    table { width: 100%; border-collapse: collapse; }
-    table, th, td { border: 1px solid #ccc; }
-    th, td { padding: 5px; text-align: left; }
-  </style>
+<title>Documentación Conductores</title>
+<style>
+	/* estilo simple para dividir pantalla */
+	.container { display: flex; }
+	.left, .right { flex: 1; padding: 10px; }
+	table { width: 80%; border-collapse: collapse; }
+	table, th, td { border: 1px solid #ccc; }
+	th, td { padding: 5px; text-align: left; }
+</style>
 </head>
 <body>
-  <div class="container">
-    <div class="left">
-      <h2>Documentación por vencer / vencida</h2>
-      <table id="docTable">
-        <thead>
-          <tr><th>Conductor</th><th>Documento</th><th>Vencimiento</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <div class="right">
-      <h2>Asignar documento</h2>
-      <form id="docForm">
-        <label>Conductor:
-          <select id="userSelect"></select>
-        </label><br><br>
-        <label>Documento:
-          <input type="text" id="docName" />
-        </label><br><br>
-        <label>Fecha de vencimiento:
-          <input type="date" id="expiryDate" />
-        </label><br><br>
-        <button type="button" id="saveBtn">Guardar documento</button>
-      </form>
-      <hr>
-      <h3>Carga masiva</h3>
-      <input type="file" id="excelFile" accept=".xlsx, .xls" /><br>
-      <button type="button" id="uploadBtn">Subir Excel</button>
-    </div>
-  </div>
-  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-  <script>
-    (function () {
-      const service = window.geotab.addin.service;
+<div class="container">
+	<div class="left">
+	<h2>Documentación por vencer / vencida</h2>
+	<table id="docTable">
+		<thead>
+		<tr><th>Conductor</th><th>Documento</th><th>Vencimiento</th></tr>
+		</thead>
+		<tbody></tbody>
+	</table>
+	</div>
+	<div class="right">
+	<h2>Asignar documento</h2>
+	<form id="docForm">
+		<label>Conductor:
+		<select id="userSelect"></select>
+		</label><br><br>
+		<label>Documento:
+		<input type="text" id="docName" />
+		</label><br><br>
+		<label>Fecha de vencimiento:
+		<input type="date" id="expiryDate" />
+		</label><br><br>
+		<button type="button" id="saveBtn">Guardar documento</button>
+	</form>
+	<hr>
+	<h3>Carga masiva</h3>
+	<input type="file" id="excelFile" accept=".xlsx, .xls" /><br>
+	<button type="button" id="uploadBtn">Subir Excel</button>
+	</div>
+</div>
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+<script>
+(function () {
+var api = null;
+var state = null;
+var logBox = document.getElementById('log');
 
-      let addInId;
-      // obtiene el addInId desde el service, si se necesita
+function log(msg) {
+	logBox.textContent += msg + '\n';
+	logBox.scrollTop = logBox.scrollHeight;
+}
 
-      async function loadUsers() {
-        // cargar los usuarios (conductores) desde la API de MyGeotab
-        const result = await service.call("Get", {
-          typeName: "User",
-          search: { /* quizá filtrar solo conductores */ }
-        });
-        const sel = document.getElementById("userSelect");
-        result.forEach(u => {
-          const opt = document.createElement("option");
-          opt.value = u.id;
-          opt.text = u.name || u.id;
-          sel.appendChild(opt);
-        });
-      }
+function loadUsers() {
+	log('👤 Cargando usuarios...');
 
-      async function loadDocuments() {
-        // traemos los AddInData para mostrar los vencimientos
-        const stored = await service.call("Get", {
-          typeName: "AddInData",
-          search: {
-            addInId: addInId,
-            select: "Details",
-          }
-        });
-        const tbody = document.querySelector("#docTable tbody");
-        tbody.innerHTML = "";
-        stored.forEach(item => {
-          const details = item.details; // JSON que guardaste
-          const userId = details.userId;
-          (details.documents || []).forEach(doc => {
-            const tr = document.createElement("tr");
-            const tdUser = document.createElement("td");
-            const tdType = document.createElement("td");
-            const tdExpiry = document.createElement("td");
-            tdUser.textContent = userId;
-            tdType.textContent = doc.type;
-            tdExpiry.textContent = doc.expiryDate;
-            tr.appendChild(tdUser);
-            tr.appendChild(tdType);
-            tr.appendChild(tdExpiry);
-            tbody.appendChild(tr);
-          });
-        });
-      }
+	api.call("Get", { typeName: "User" }, function (result) {
+	var select = document.getElementById("userSelect");
+	select.innerHTML = "";
 
-      async function saveDocument() {
-        const userId = document.getElementById("userSelect").value;
-        const docName = document.getElementById("docName").value;
-        const expiry = document.getElementById("expiryDate").value;
+	for (var i = 0; i < result.length; i++) {
+		var opt = document.createElement("option");
+		opt.value = result[i].id;
+		opt.textContent = result[i].name || result[i].id;
+		select.appendChild(opt);
+	}
 
-        // construir el JSON
-        const data = {
-          userId,
-          documents: [
-            { type: docName, expiryDate: expiry }
-          ]
-        };
+	log("✅ Usuarios cargados: " + result.length);
+	}, function (err) {
+	log("❌ Error al cargar usuarios: " + err);
+	});
+}
 
-        await service.call("Add", {
-          typeName: "AddInData",
-          entity: {
-            addInId: addInId,
-            details: data
-          }
-        });
+	async function loadDocuments() {
+		// traemos los AddInData para mostrar los vencimientos
+		const stored = await service.call("Get", {
+		typeName: "AddInData",
+		search: {
+			addInId: addInId,
+			select: "Details",
+		}
+		});
+		const tbody = document.querySelector("#docTable tbody");
+		tbody.innerHTML = "";
+		stored.forEach(item => {
+		const details = item.details; // JSON que guardaste
+		const userId = details.userId;
+		(details.documents || []).forEach(doc => {
+			const tr = document.createElement("tr");
+			const tdUser = document.createElement("td");
+			const tdType = document.createElement("td");
+			const tdExpiry = document.createElement("td");
+			tdUser.textContent = userId;
+			tdType.textContent = doc.type;
+			tdExpiry.textContent = doc.expiryDate;
+			tr.appendChild(tdUser);
+			tr.appendChild(tdType);
+			tr.appendChild(tdExpiry);
+			tbody.appendChild(tr);
+		});
+		});
+	}
 
-        await loadDocuments();
-      }
+	async function saveDocument() {
+		const userId = document.getElementById("userSelect").value;
+		const docName = document.getElementById("docName").value;
+		const expiry = document.getElementById("expiryDate").value;
 
-      async function uploadExcel(event) {
-        const f = event.target.files[0];
-        const data = await f.arrayBuffer();
-        const wb = XLSX.read(data, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
-        // espera que las filas tengan [userId, documento, fecha]
-        for (let i = 1; i < json.length; i++) {
-          const row = json[i];
-          const [userId, docName, expiry] = row;
-          if (!userId || !docName || !expiry) continue;
-          await service.call("Add", {
-            typeName: "AddInData",
-            entity: {
-              addInId: addInId,
-              details: {
-                userId,
-                documents: [
-                  { type: docName, expiryDate: expiry }
-                ]
-              }
-            }
-          });
-        }
-        await loadDocuments();
-      }
+		// construir el JSON
+		const data = {
+		userId,
+		documents: [
+			{ type: docName, expiryDate: expiry }
+		]
+		};
 
-      // inicialización
-      window.geotab.addin.myNamespace = function (elt, svc) {
-        service = svc;
-        addInId = svc.addInId;
+		await service.call("Add", {
+		typeName: "AddInData",
+		entity: {
+			addInId: addInId,
+			details: data
+		}
+		});
 
-        loadUsers();
-        loadDocuments();
+		await loadDocuments();
+	}
 
-        document.getElementById("saveBtn").addEventListener("click", saveDocument);
-        document.getElementById("uploadBtn").addEventListener("click", () => {
-          const inp = document.getElementById("excelFile");
-          inp.click();
-        });
-        document.getElementById("excelFile").addEventListener("change", uploadExcel);
-      };
-    })();
-  </script>
+	async function uploadExcel(event) {
+		const f = event.target.files[0];
+		const data = await f.arrayBuffer();
+		const wb = XLSX.read(data, { type: "array" });
+		const ws = wb.Sheets[wb.SheetNames[0]];
+		const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
+		// espera que las filas tengan [userId, documento, fecha]
+		for (let i = 1; i < json.length; i++) {
+		const row = json[i];
+		const [userId, docName, expiry] = row;
+		if (!userId || !docName || !expiry) continue;
+		await service.call("Add", {
+			typeName: "AddInData",
+			entity: {
+			addInId: addInId,
+			details: {
+				userId,
+				documents: [
+				{ type: docName, expiryDate: expiry }
+				]
+			}
+			}
+		});
+		}
+		await loadDocuments();
+	}
+
+	// inicialización
+	window.geotab.addin.myNamespace = function (elt, svc) {
+		service = svc;
+		addInId = svc.addInId;
+
+		loadUsers();
+		loadDocuments();
+
+		document.getElementById("saveBtn").addEventListener("click", saveDocument);
+		document.getElementById("uploadBtn").addEventListener("click", () => {
+		const inp = document.getElementById("excelFile");
+		inp.click();
+		});
+		document.getElementById("excelFile").addEventListener("change", uploadExcel);
+	};
+	})();
+</script>
 </body>
 </html>
