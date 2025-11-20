@@ -1,176 +1,57 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
+<meta charset="UTF-8" />
 <title>Documentación Conductores</title>
 <style>
-	/* estilo simple para dividir pantalla */
-	.container { display: flex; }
-	.left, .right { flex: 1; padding: 10px; }
-	table { width: 80%; border-collapse: collapse; }
-	table, th, td { border: 1px solid #ccc; }
-	th, td { padding: 5px; text-align: left; }
+body { font-family: Arial; margin: 0; padding: 0; }
+.container { display: flex; height: 100vh; }
+.left, .right { flex: 1; padding: 15px; overflow-y: auto; }
+.left { border-right: 1px solid #ccc; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #ccc; padding: 6px; }
+#log { height: 120px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #ccc; padding: 5px; margin-top: 10px; }
 </style>
 </head>
 <body>
 <div class="container">
-	<div class="left">
-	<h2>Documentación por vencer / vencida</h2>
-	<table id="docTable">
-		<thead>
-		<tr><th>Conductor</th><th>Documento</th><th>Vencimiento</th></tr>
-		</thead>
-		<tbody></tbody>
-	</table>
-	</div>
-	<div class="right">
-	<h2>Asignar documento</h2>
-	<form id="docForm">
-		<label>Conductor:
-		<select id="userSelect"></select>
-		</label><br><br>
-		<label>Documento:
-		<input type="text" id="docName" />
-		</label><br><br>
-		<label>Fecha de vencimiento:
-		<input type="date" id="expiryDate" />
-		</label><br><br>
-		<button type="button" id="saveBtn">Guardar documento</button>
-	</form>
-	<hr>
-	<h3>Carga masiva</h3>
-	<input type="file" id="excelFile" accept=".xlsx, .xls" /><br>
-	<button type="button" id="uploadBtn">Subir Excel</button>
-	</div>
+<div class="left">
+<h2>Documentación por vencer</h2>
+<table id="docTable">
+<thead><tr><th>Conductor</th><th>Documento</th><th>Vence</th></tr></thead>
+<tbody></tbody>
+</table>
+<div id="log"></div>
+</div>
+<div class="right">
+<h2>Asignar documento</h2>
+<label>Conductor</label><br>
+<select id="userSelect"></select><br><br>
+<label>Documento</label><br>
+<input id="docName" type="text"><br><br>
+<label>Vencimiento</label><br>
+<input id="expiryDate" type="date"><br><br>
+<button id="saveBtn">Guardar</button>
+<hr>
+<h3>Carga masiva</h3>
+<input id="excelFile" type="file" accept=".xlsx,.xls" style="display:none">
+<button id="uploadBtn">Subir Excel</button>
+</div>
 </div>
 <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 <script>
-(function () {
-var api = null;
-var state = null;
-var logBox = document.getElementById('log');
-
-function log(msg) {
-	logBox.textContent += msg + '\n';
-	logBox.scrollTop = logBox.scrollHeight;
+(function(){
+var api=null; var state=null; var logBox=null; var addInId=null;
+function log(t){ logBox.textContent+=t+"\n"; logBox.scrollTop=logBox.scrollHeight; }
+function loadUsers(){ log("Cargando usuarios..."); api.call("Get",{typeName:"User"},function(r){ var s=document.getElementById("userSelect"); s.innerHTML=""; r.forEach(function(u){ var o=document.createElement("option"); o.value=u.id; o.textContent=u.name||u.id; s.appendChild(o); }); log("Usuarios cargados: "+r.length); },function(e){ log("Error usuarios: "+e); }); }
+function loadDocuments(){ log("Cargando documentos..."); api.call("Get",{typeName:"AddInData",search:{addInId:addInId}},function(r){ var tb=document.querySelector("#docTable tbody"); tb.innerHTML=""; r.forEach(function(it){ var d=it.details||{}; var uid=d.userId; var docs=d.documents||[]; docs.forEach(function(dc){ var tr=document.createElement("tr"); var td1=document.createElement("td"); var td2=document.createElement("td"); var td3=document.createElement("td"); td1.textContent=uid; td2.textContent=dc.type; td3.textContent=dc.expiryDate; tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tb.appendChild(tr); }); }); log("Documentos cargados"); },function(e){ log("Error doc: "+e); }); }
+function saveDocument(){ var uid=document.getElementById("userSelect").value; var dn=document.getElementById("docName").value; var ex=document.getElementById("expiryDate").value; var data={userId:uid,documents:[{type:dn,expiryDate:ex}]}; api.call("Add",{typeName:"AddInData",entity:{addInId:addInId,details:data}},function(){ log("Guardado"); loadDocuments(); },function(e){ log("Error guardado: "+e); }); }
+function uploadExcel(e){ var f=e.target.files[0]; if(!f)return; var fr=new FileReader(); fr.onload=function(){ var wb=XLSX.read(fr.result,{type:"binary"}); var ws=wb.Sheets[wb.SheetNames[0]]; var j=XLSX.utils.sheet_to_json(ws,{header:1}); var p=Promise.resolve(); for(var i=1;i<j.length;i++){ (function(row){ var uid=row[0]; var dn=row[1]; var ex=row[2]; if(!uid||!dn||!ex)return; var data={userId:uid,documents:[{type:dn,expiryDate:ex}]}; p=p.then(function(){ return new Promise(function(res){ api.call("Add",{typeName:"AddInData",entity:{addInId:addInId,details:data}},function(){res();},function(){res();}); }); }); })(j[i]); }
+ p.then(function(){ log("Excel procesado"); loadDocuments(); }); };
+ fr.readAsBinaryString(f);
 }
-
-function loadUsers() {
-	log('👤 Cargando usuarios...');
-
-	api.call("Get", { typeName: "User" }, function (result) {
-	var select = document.getElementById("userSelect");
-	select.innerHTML = "";
-
-	for (var i = 0; i < result.length; i++) {
-		var opt = document.createElement("option");
-		opt.value = result[i].id;
-		opt.textContent = result[i].name || result[i].id;
-		select.appendChild(opt);
-	}
-
-	log("✅ Usuarios cargados: " + result.length);
-	}, function (err) {
-	log("❌ Error al cargar usuarios: " + err);
-	});
-}
-
-	async function loadDocuments() {
-		// traemos los AddInData para mostrar los vencimientos
-		const stored = await service.call("Get", {
-		typeName: "AddInData",
-		search: {
-			addInId: addInId,
-			select: "Details",
-		}
-		});
-		const tbody = document.querySelector("#docTable tbody");
-		tbody.innerHTML = "";
-		stored.forEach(item => {
-		const details = item.details; // JSON que guardaste
-		const userId = details.userId;
-		(details.documents || []).forEach(doc => {
-			const tr = document.createElement("tr");
-			const tdUser = document.createElement("td");
-			const tdType = document.createElement("td");
-			const tdExpiry = document.createElement("td");
-			tdUser.textContent = userId;
-			tdType.textContent = doc.type;
-			tdExpiry.textContent = doc.expiryDate;
-			tr.appendChild(tdUser);
-			tr.appendChild(tdType);
-			tr.appendChild(tdExpiry);
-			tbody.appendChild(tr);
-		});
-		});
-	}
-
-	async function saveDocument() {
-		const userId = document.getElementById("userSelect").value;
-		const docName = document.getElementById("docName").value;
-		const expiry = document.getElementById("expiryDate").value;
-
-		// construir el JSON
-		const data = {
-		userId,
-		documents: [
-			{ type: docName, expiryDate: expiry }
-		]
-		};
-
-		await service.call("Add", {
-		typeName: "AddInData",
-		entity: {
-			addInId: addInId,
-			details: data
-		}
-		});
-
-		await loadDocuments();
-	}
-
-	async function uploadExcel(event) {
-		const f = event.target.files[0];
-		const data = await f.arrayBuffer();
-		const wb = XLSX.read(data, { type: "array" });
-		const ws = wb.Sheets[wb.SheetNames[0]];
-		const json = XLSX.utils.sheet_to_json(ws, { header: 1 });
-		// espera que las filas tengan [userId, documento, fecha]
-		for (let i = 1; i < json.length; i++) {
-		const row = json[i];
-		const [userId, docName, expiry] = row;
-		if (!userId || !docName || !expiry) continue;
-		await service.call("Add", {
-			typeName: "AddInData",
-			entity: {
-			addInId: addInId,
-			details: {
-				userId,
-				documents: [
-				{ type: docName, expiryDate: expiry }
-				]
-			}
-			}
-		});
-		}
-		await loadDocuments();
-	}
-
-	// inicialización
-	window.geotab.addin.myNamespace = function (elt, svc) {
-		service = svc;
-		addInId = svc.addInId;
-
-		loadUsers();
-		loadDocuments();
-
-		document.getElementById("saveBtn").addEventListener("click", saveDocument);
-		document.getElementById("uploadBtn").addEventListener("click", () => {
-		const inp = document.getElementById("excelFile");
-		inp.click();
-		});
-		document.getElementById("excelFile").addEventListener("change", uploadExcel);
-	};
-	})();
+window.geotab.addin.docVencimientos=function(elt,_api,_state){ api=_api; state=_state; addInId=_state.addInId; logBox=document.getElementById("log"); loadUsers(); loadDocuments(); document.getElementById("saveBtn").onclick=saveDocument; document.getElementById("uploadBtn").onclick=function(){ document.getElementById("excelFile").click(); }; document.getElementById("excelFile").onchange=uploadExcel; };
+})();
 </script>
 </body>
 </html>
