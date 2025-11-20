@@ -7,79 +7,150 @@
         body {
             font-family: Arial;
             padding: 20px;
+            display: flex;
+            gap: 40px;
+        }
+        #left, #right {
+            width: 45%;
+        }
+        h2 {
+            margin-top: 0;
         }
         .inputBox {
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
         label {
             display: block;
             margin-bottom: 4px;
         }
-        input[type=text], input[type=date] {
-            width: 250px;
+        input[type=text], input[type=date], select {
+            width: 260px;
             padding: 8px;
             border: 1px solid #ccc;
             border-radius: 6px;
         }
         button {
-            padding: 10px 16px;
-            background: #0084ff;
+            padding: 10px 18px;
+            background: #0078ff;
             color: #fff;
             border: none;
             border-radius: 6px;
             cursor: pointer;
         }
+        #list {
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 6px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .item {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        .item:last-child {
+            border-bottom: none;
+        }
         #msg {
-            margin-top: 20px;
+            margin-top: 15px;
             font-weight: bold;
         }
     </style>
 </head>
 <body>
-    <h2>Documentos del Usuario</h2>
 
-    <div class="inputBox">
-        <label>Documento</label>
-        <input id="docName" type="text">
+    <div id="left">
+        <h2>Documentos guardados</h2>
+        <div id="list"></div>
     </div>
 
-    <div class="inputBox">
-        <label>Vencimiento</label>
-        <input id="docDate" type="date">
+    <div id="right">
+        <h2>Gestión de documentos</h2>
+
+        <div class="inputBox">
+            <label>Usuario</label>
+            <select id="userSelect"></select>
+        </div>
+
+        <div class="inputBox">
+            <label>Nombre del documento</label>
+            <input id="docName" type="text">
+        </div>
+
+        <div class="inputBox">
+            <label>Fecha de vencimiento</label>
+            <input id="docDate" type="date">
+        </div>
+
+        <button id="btnSave">Guardar</button>
+
+        <div id="msg"></div>
     </div>
-
-    <button id="btnSave">Guardar</button>
-
-    <div id="msg"></div>
 
     <script>
         var api;
-        var currentUserId;
+        var users = [];
+
+        function loadUsers() {
+            api.call("Get", { typeName: "User" }, function(r) {
+                users = r;
+                var sel = document.getElementById("userSelect");
+                sel.innerHTML = "";
+                r.forEach(function(u) {
+                    var opt = document.createElement("option");
+                    opt.value = u.id;
+                    opt.textContent = u.name;
+                    sel.appendChild(opt);
+                });
+                loadDocuments();
+            });
+        }
+
+        function loadDocuments() {
+            var userId = document.getElementById("userSelect").value;
+            var addInId = "DOC_" + userId;
+
+            api.call("Get", {
+                typeName: "AddInData",
+                search: { addInId: addInId }
+            }, function(r) {
+                var list = document.getElementById("list");
+                list.innerHTML = "";
+                if (r.length === 0) return;
+
+                var docs = r[0].details && r[0].details.documents ? r[0].details.documents : [];
+
+                docs.forEach(function(d) {
+                    var div = document.createElement("div");
+                    div.className = "item";
+                    div.textContent = d.nombre + " | vence: " + d.vence;
+                    list.appendChild(div);
+                });
+            });
+        }
 
         function loadExisting(addInId, callback) {
             api.call("Get", {
                 typeName: "AddInData",
                 search: { addInId: addInId }
             }, function(result) {
-                if (result && result.length > 0) {
-                    callback(result[0]);
-                } else {
-                    callback(null);
-                }
-            }, function() {
-                callback(null);
-            });
+                if (result && result.length > 0) callback(result[0]);
+                else callback(null);
+            }, function() { callback(null); });
         }
 
         function saveDocument() {
+            var userId = document.getElementById("userSelect").value;
             var name = document.getElementById("docName").value;
             var vence = document.getElementById("docDate").value;
-            if (!name || ! vence) {
+
+            if (!name || !vence) {
                 document.getElementById("msg").innerText = "Falta completar datos";
                 return;
             }
 
-            var addInId = "DOC_" + currentUserId;
+            var addInId = "DOC_" + userId;
+
             loadExisting(addInId, function(existing) {
                 if (existing) {
                     if (!existing.details) existing.details = {};
@@ -88,32 +159,34 @@
                         nombre: name,
                         vence: vence
                     });
+
                     api.call("Set", {
                         typeName: "AddInData",
                         entity: existing
                     }, function() {
                         document.getElementById("msg").innerText = "Actualizado";
+                        loadDocuments();
                     }, function(e) {
                         document.getElementById("msg").innerText = "Error: " + JSON.stringify(e);
                     });
+
                 } else {
                     var entity = {
                         addInId: addInId,
                         details: {
-                            userId: currentUserId,
+                            userId: userId,
                             documents: [
-                                {
-                                    nombre: name,
-                                    vence: vence
-                                }
+                                { nombre: name, vence: vence }
                             ]
                         }
                     };
+
                     api.call("Add", {
                         typeName: "AddInData",
                         entity: entity
                     }, function() {
                         document.getElementById("msg").innerText = "Guardado";
+                        loadDocuments();
                     }, function(e) {
                         document.getElementById("msg").innerText = "Error: " + JSON.stringify(e);
                     });
@@ -123,16 +196,18 @@
 
         document.getElementById("btnSave").addEventListener("click", saveDocument);
 
+        document.getElementById("userSelect").addEventListener("change", loadDocuments);
+
         geotab.addin.documentos = function(apiRef, state) {
             api = apiRef;
-            api.getSession(function(s) {
-                currentUserId = s.userName;
-            });
             return {
-                initialize: function(apiRef, state) {},
+                initialize: function(apiRef, state) {
+                    loadUsers();
+                },
                 draw: function(apiRef, state) {}
             };
         };
     </script>
+
 </body>
 </html>
