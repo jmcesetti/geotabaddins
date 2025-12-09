@@ -93,6 +93,7 @@
         try {
           var line = turf.lineString(coords);
           var buffer = turf.buffer(line, 10, { units: 'meters' });
+          buffer.properties = { name: name || "KML" };
           var kml = tokml(buffer);
           var blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
           var a = document.createElement("a");
@@ -139,3 +140,4 @@
   </script>
 </body>
 </html>
+
