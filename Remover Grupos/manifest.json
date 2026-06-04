@@ -1,0 +1,14 @@
+{
+    "name": "Editar Grupos Masivo",
+    "supportEmail": "jm@cesetti.com.ar",
+    "version": "1.0",
+    "items": [
+        {
+            "url": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/Remover%20Grupos/geotab-group-manager.html",
+            "path": "tripsHistory/",
+            "menuName": "Editar Grupos Masivo",
+            "icon": ""
+        }
+    ],
+    "isSigned": false
+}
