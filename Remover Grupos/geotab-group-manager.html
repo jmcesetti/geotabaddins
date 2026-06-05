@@ -1072,19 +1072,22 @@ var geotabGroupManager = function(api_, state_) {
         // Standalone / debug mode: api injected globally
         App.init(api);
     } else {
-        // Dev mode: show setup instructions
-        document.body.innerHTML = `
-            <div style="font-family:Arial,Helvetica,sans-serif; padding:24px; color:#333; background:#f4f6f8; min-height:100vh;">
-                <h1 style="font-size:22px; margin-bottom:12px;">Abre este add-in desde la plataforma Geotab</h1>
-                <p style="font-size:15px; line-height:1.6; max-width:640px;">Este archivo necesita la API de Geotab para cargar el formato interactivo. Si estás probando localmente, inyecta la API global como <code>api</code> o abre el add-in dentro de Geotab.</p>
-            </div>
-        `;
-        console.info('[GroupManager] Waiting for Geotab API. Register as Add-In or inject api globally.');
+        // No API available: keep the HTML visible for development/debugging
+        console.info('[GroupManager] No Geotab API detected. Abriendo en modo visual estático.');
+        const msg = 'Advertencia: no se detecta la API de Geotab. El add-in solo funcionará dentro de la plataforma Geotab.';
+        if (document.getElementById('toastWrap')) {
+            const div = document.createElement('div');
+            div.className = 'toast toast-warning';
+            div.style.position = 'fixed';
+            div.style.top = '20px';
+            div.style.right = '20px';
+            div.style.zIndex = 2001;
+            div.innerHTML = `<span>⚠</span><span style="margin-left:8px">${msg}</span>`;
+            document.body.appendChild(div);
+        }
     }
 })();
 
-// Expose for browser console debugging
-window._GM = { App, State: S, API, Filter, Tbl };
 </script>
 </body>
 </html>
