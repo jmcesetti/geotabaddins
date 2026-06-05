@@ -398,6 +398,8 @@ input[type=checkbox]{accent-color:var(--primary);width:15px;height:15px;cursor:p
 
 <script>
 'use strict';
+let api = null;
+let state = null;
 
 /* ════════════════════════════════════════════
 CONFIGURATION
@@ -1051,23 +1053,20 @@ clearSel() {
 /* ════════════════════════════════════════════
 GEOTAB ADD-IN REGISTRATION
 ════════════════════════════════════════════ */
-// Standard Geotab Add-In function — name must match config.js "page" property
-var geotabGroupManager = function(api_, state_) {
-    api = api_;
-    state = state_;
-    return {
-        initialize: function(freshApi, freshState, callback) {
-            App.init(freshApi || api).finally(() => { if (typeof callback === 'function') callback(); });
-        },
-        focus: function(focusApi) { API.init(focusApi || api); },
-        blur: function() {}
-    };
-};
-
-// Register with Geotab Add-In framework if available
 (function() {
     if (typeof geotab !== 'undefined' && geotab.addin) {
-        geotab.addin.groupManager = geotabGroupManager;
+        geotab.addin.groupManager = function(api_, state_) {
+            api = api_;
+            state = state_;
+            return {
+                initialize: function(initApi, initState, callback) {
+                    App.init(initApi || api).finally(() => { if (typeof callback === 'function') callback(); });
+                },
+                focus: function(focusApi) { API.init(focusApi || api); },
+                blur: function() {}
+            };
+        };
+        geotab.addin.exportKML = geotab.addin.groupManager;
     } else if (typeof api !== 'undefined') {
         // Standalone / debug mode: api injected globally
         App.init(api);
