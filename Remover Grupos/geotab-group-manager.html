@@ -1052,27 +1052,35 @@ clearSel() {
 GEOTAB ADD-IN REGISTRATION
 ════════════════════════════════════════════ */
 // Standard Geotab Add-In function — name must match config.js "page" property
-var geotabGroupManager = function(api, state) {
-return {
-    initialize: function(freshApi, freshState, callback) {
-    App.init(freshApi).finally(() => { if (typeof callback === 'function') callback(); });
-    },
-    focus: function(focusApi) { API.init(focusApi); },
-    blur: function() {}
-};
+var geotabGroupManager = function(api_, state_) {
+    api = api_;
+    state = state_;
+    return {
+        initialize: function(freshApi, freshState, callback) {
+            App.init(freshApi || api).finally(() => { if (typeof callback === 'function') callback(); });
+        },
+        focus: function(focusApi) { API.init(focusApi || api); },
+        blur: function() {}
+    };
 };
 
 // Register with Geotab Add-In framework if available
 (function() {
-if (typeof geotab !== 'undefined' && geotab.addin) {
-    geotab.addin.groupManager = geotabGroupManager;
-} else if (typeof api !== 'undefined') {
-    // Standalone / debug mode: api injected globally
-    App.init(api);
-} else {
-    // Dev mode: show setup instructions
-    console.info('[GroupManager] Waiting for Geotab API. Register as Add-In or inject api globally.');
-}
+    if (typeof geotab !== 'undefined' && geotab.addin) {
+        geotab.addin.groupManager = geotabGroupManager;
+    } else if (typeof api !== 'undefined') {
+        // Standalone / debug mode: api injected globally
+        App.init(api);
+    } else {
+        // Dev mode: show setup instructions
+        document.body.innerHTML = `
+            <div style="font-family:Arial,Helvetica,sans-serif; padding:24px; color:#333; background:#f4f6f8; min-height:100vh;">
+                <h1 style="font-size:22px; margin-bottom:12px;">Abre este add-in desde la plataforma Geotab</h1>
+                <p style="font-size:15px; line-height:1.6; max-width:640px;">Este archivo necesita la API de Geotab para cargar el formato interactivo. Si estás probando localmente, inyecta la API global como <code>api</code> o abre el add-in dentro de Geotab.</p>
+            </div>
+        `;
+        console.info('[GroupManager] Waiting for Geotab API. Register as Add-In or inject api globally.');
+    }
 })();
 
 // Expose for browser console debugging
