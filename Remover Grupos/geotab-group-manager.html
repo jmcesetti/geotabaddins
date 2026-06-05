@@ -2,1091 +2,472 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Geotab — Administrador de Grupos</title>
+<title>Gestor de Grupos</title>
 <style>
-:root {
---primary: #0c6eb5;
---primary-dk: #095a96;
---primary-lt: #e8f2fb;
---success: #1e7e34;
---success-lt: #d4edda;
---danger: #c82333;
---danger-lt: #f8d7da;
---warning: #d39e00;
---warning-lt: #fff3cd;
---g50: #f8f9fa; --g100: #f1f3f5; --g200: #e9ecef;
---g300: #dee2e6; --g400: #ced4da; --g500: #adb5bd;
---g600: #6c757d; --g700: #495057; --g800: #343a40; --g900: #212529;
---white: #fff;
---sh-sm: 0 1px 3px rgba(0,0,0,.1);
---sh-md: 0 4px 12px rgba(0,0,0,.12);
---sh-lg: 0 8px 24px rgba(0,0,0,.16);
---r: 6px; --r-lg: 10px;
---t: .18s ease;
-}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;color:var(--g800);background:var(--g100);min-height:100vh}
-
-/* ── Header ── */
-.hdr{background:var(--white);border-bottom:1px solid var(--g200);padding:0 24px;display:flex;align-items:center;height:56px;box-shadow:var(--sh-sm);position:sticky;top:0;z-index:100}
-.hdr-title{font-size:17px;font-weight:700;color:var(--primary);display:flex;align-items:center;gap:10px}
-.hdr-title svg{flex-shrink:0}
-
-/* ── Layout ── */
-.wrap{max-width:1440px;margin:0 auto;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
-
-/* ── Toggle ── */
-.toggle{display:flex;background:var(--g200);border-radius:8px;padding:3px;align-self:flex-start}
-.toggle button{display:flex;align-items:center;gap:7px;padding:8px 22px;border:none;background:transparent;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;color:var(--g600);transition:all var(--t)}
-.toggle button.on{background:var(--white);color:var(--primary);box-shadow:var(--sh-sm)}
-
-/* ── Card ── */
-.card{background:var(--white);border-radius:var(--r-lg);box-shadow:var(--sh-sm);border:1px solid var(--g200)}
-.card-hdr{padding:14px 18px;border-bottom:1px solid var(--g200);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.card-title{font-size:14px;font-weight:600;color:var(--g800);display:flex;align-items:center;gap:7px}
-.card-body{padding:16px 18px}
-
-/* ── Filters grid ── */
-.fgrid{display:grid;grid-template-columns:1fr 1fr 180px auto;gap:12px;align-items:end}
-@media(max-width:900px){.fgrid{grid-template-columns:1fr 1fr}}
-@media(max-width:600px){.fgrid{grid-template-columns:1fr}}
-.flabel{font-size:11px;font-weight:700;color:var(--g500);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
-.finput{width:100%;padding:8px 11px;border:1px solid var(--g300);border-radius:var(--r);font-size:14px;color:var(--g800);background:var(--white);outline:none;transition:border-color var(--t)}
-.finput:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(12,110,181,.12)}
-
-/* ── Multi-select ── */
-.ms{position:relative}
-.ms-trigger{width:100%;padding:7px 11px;border:1px solid var(--g300);border-radius:var(--r);font-size:14px;background:var(--white);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:36px;transition:border-color var(--t)}
-.ms-trigger.open,.ms-trigger:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px rgba(12,110,181,.12)}
-.ms-tags{display:flex;flex-wrap:wrap;gap:3px;flex:1;min-width:0}
-.ms-placeholder{font-size:13px;color:var(--g500)}
-.ms-drop{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--white);border:1px solid var(--g300);border-radius:var(--r);box-shadow:var(--sh-md);z-index:300;max-height:300px;overflow:hidden;display:flex;flex-direction:column}
-.ms-drop.hidden{display:none}
-.ms-search{padding:7px;border-bottom:1px solid var(--g200)}
-.ms-search input{width:100%;padding:5px 9px;border:1px solid var(--g300);border-radius:4px;font-size:13px;outline:none}
-.ms-list{overflow-y:auto;max-height:220px}
-.ms-opt{display:flex;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;transition:background var(--t);font-size:13px}
-.ms-opt:hover{background:var(--primary-lt)}
-.ms-opt input{accent-color:var(--primary);width:14px;height:14px;cursor:pointer;flex-shrink:0}
-.ms-empty{padding:14px;text-align:center;color:var(--g500);font-size:13px}
-
-/* ── Tag ── */
-.tag{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;background:var(--primary-lt);color:var(--primary);border-radius:99px;font-size:12px;font-weight:500;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tag-x{cursor:pointer;opacity:.7;flex-shrink:0;line-height:1;font-size:11px}
-.tag-x:hover{opacity:1}
-
-/* ── Buttons ── */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 15px;border:none;border-radius:var(--r);font-size:14px;font-weight:500;cursor:pointer;transition:all var(--t);white-space:nowrap;line-height:1}
-.btn:disabled{opacity:.45;cursor:not-allowed;pointer-events:none}
-.btn-primary{background:var(--primary);color:var(--white)}
-.btn-primary:hover{background:var(--primary-dk);box-shadow:0 2px 8px rgba(12,110,181,.3)}
-.btn-secondary{background:var(--g100);color:var(--g700);border:1px solid var(--g300)}
-.btn-secondary:hover{background:var(--g200)}
-.btn-danger{background:#dc3545;color:var(--white)}
-.btn-danger:hover{background:var(--danger)}
-.btn-success{background:#28a745;color:var(--white)}
-.btn-success:hover{background:var(--success)}
-.btn-ghost{background:rgba(255,255,255,.2);color:var(--white);border:1px solid rgba(255,255,255,.35)}
-.btn-ghost:hover{background:rgba(255,255,255,.3)}
-.btn-white{background:var(--white);color:var(--primary)}
-.btn-white:hover{background:var(--primary-lt)}
-.btn-sm{padding:5px 11px;font-size:13px}
-.btn-xs{padding:3px 8px;font-size:12px}
-
-/* ── Table ── */
-.tbl-wrap{overflow-x:auto}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#333;font-size:14px}
+#groupManager{padding:16px;max-width:1400px;margin:0 auto}
+.card{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.08);padding:18px;margin-bottom:12px}
+h1{color:#0076be;font-size:20px;font-weight:600}
+.sub{color:#666;font-size:12px;margin-top:3px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}
+.tab{padding:7px 18px;border-radius:8px;border:2px solid #ddd;cursor:pointer;font-size:13px;font-weight:500;background:#fff;transition:.2s}
+.tab.active{background:#0076be;color:#fff;border-color:#0076be}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.fg{display:flex;flex-direction:column;gap:4px}
+label{font-size:11px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.4px}
+input[type=text]{padding:7px 10px;border:1.5px solid #d0d7de;border-radius:7px;font-size:13px;outline:none;width:200px}
+input[type=text]:focus{border-color:#0076be}
+button{padding:7px 14px;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:500;transition:.2s}
+.bp{background:#0076be;color:#fff}.bp:hover{background:#005a9e}
+.bs{background:#f0f2f5;color:#333;border:1.5px solid #ddd}.bs:hover{background:#e3e5e8}
+.bg{background:#28a745;color:#fff}.bg:hover{background:#218838}
+.br{background:#dc3545;color:#fff}.br:hover{background:#c82333}
+button:disabled{opacity:.45;cursor:not-allowed}
+/* Table */
+.ttop{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}
+.cnt{font-size:12px;color:#666}
+.tw{overflow:auto;max-height:460px;border-radius:8px;border:1px solid #e0e0e0}
 table{width:100%;border-collapse:collapse}
-thead th{padding:9px 12px;text-align:left;font-size:11px;font-weight:700;color:var(--g600);text-transform:uppercase;letter-spacing:.5px;background:var(--g50);border-bottom:2px solid var(--g200);white-space:nowrap;user-select:none}
-thead th.sortable{cursor:pointer}
-thead th.sortable:hover{background:var(--g100);color:var(--primary)}
-thead th.sorted{color:var(--primary)}
-.sort-i{margin-left:4px;opacity:.35;font-style:normal;font-size:11px}
-.sorted .sort-i{opacity:1}
-tbody tr{border-bottom:1px solid var(--g100);transition:background var(--t)}
-tbody tr:hover{background:var(--g50)}
-tbody tr.sel{background:var(--primary-lt)}
-tbody tr.sel:hover{background:#d0e4f5}
-td{padding:9px 12px;vertical-align:middle}
-.td-name{font-weight:500;line-height:1.3}
-.td-sub{font-size:12px;color:var(--g500);margin-top:2px}
-.gbadges{display:flex;flex-wrap:wrap;gap:3px}
-.gbadge{display:inline-block;padding:2px 8px;background:var(--g100);color:var(--g700);border-radius:99px;font-size:11px;white-space:nowrap;border:1px solid var(--g200)}
-.gbadge-more{background:var(--primary-lt);color:var(--primary);border-color:transparent;cursor:pointer}
-.gbadge-none{font-size:12px;color:var(--g400)}
-.sbadge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:99px;font-size:12px;font-weight:500}
-.s-on{background:var(--success-lt);color:var(--success)}
-.s-off{background:var(--danger-lt);color:var(--danger)}
-
-/* ── Selection bar ── */
-.sel-bar{background:var(--primary);color:var(--white);padding:12px 18px;border-radius:var(--r-lg);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;box-shadow:0 2px 10px rgba(12,110,181,.3)}
-.sel-info{font-weight:600;font-size:15px}
-.sel-actions{display:flex;gap:8px;flex-wrap:wrap}
-
-/* ── Pagination ── */
-.pgn{display:flex;align-items:center;gap:4px;justify-content:center;flex-wrap:wrap}
-.pg-btn{min-width:32px;height:32px;padding:0 8px;border:1px solid var(--g300);border-radius:var(--r);background:var(--white);color:var(--g700);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;transition:all var(--t)}
-.pg-btn:hover:not(:disabled):not(.on){background:var(--g100)}
-.pg-btn.on{background:var(--primary);color:var(--white);border-color:var(--primary)}
-.pg-btn:disabled{opacity:.35;cursor:not-allowed}
-
-/* ── Modal ── */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;backdrop-filter:blur(2px)}
-.overlay.hidden{display:none}
-.modal{background:var(--white);border-radius:var(--r-lg);box-shadow:var(--sh-lg);width:100%;max-width:540px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;animation:mIn .18s ease}
-.modal-lg{max-width:700px}
-@keyframes mIn{from{transform:scale(.95);opacity:0}to{transform:scale(1);opacity:1}}
-.m-hdr{padding:15px 18px;border-bottom:1px solid var(--g200);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.m-title{font-size:15px;font-weight:600}
-.m-close{width:28px;height:28px;border:none;background:var(--g100);border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--g600);transition:background var(--t)}
-.m-close:hover{background:var(--g200)}
-.m-body{padding:18px;overflow-y:auto;flex:1}
-.m-foot{padding:14px 18px;border-top:1px solid var(--g200);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0}
-
-/* ── Progress ── */
-.progress-wrap{background:var(--g200);border-radius:99px;height:8px;overflow:hidden;margin:14px 0}
-.progress-fill{height:100%;background:var(--primary);border-radius:99px;transition:width .3s ease}
-.progress-txt{text-align:center;font-size:13px;color:var(--g600);margin-top:6px}
-.spinner{width:38px;height:38px;border:3px solid var(--g200);border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-/* ── Empty / loading ── */
-.empty{padding:52px 20px;text-align:center;color:var(--g500)}
-.empty-ico{font-size:44px;margin-bottom:12px}
-.empty h3{font-size:15px;font-weight:600;color:var(--g600);margin-bottom:5px}
-.empty p{font-size:13px}
-.loading{display:flex;flex-direction:column;align-items:center;padding:44px;color:var(--g600);font-size:14px}
-
-/* ── Summary boxes ── */
-.sum-box{background:var(--g50);border:1px solid var(--g200);border-radius:var(--r);padding:13px;margin-bottom:11px}
-.sum-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--g500);margin-bottom:7px}
-.sum-num{font-size:28px;font-weight:700;color:var(--primary)}
-.info-box{background:var(--primary-lt);border-left:4px solid var(--primary);border-radius:var(--r);padding:11px 13px;font-size:13px;color:var(--primary-dk);margin-bottom:14px}
-.warn-box{background:var(--warning-lt);border-left:4px solid #ffc107;border-radius:var(--r);padding:11px 13px;font-size:13px;color:#856404;margin-bottom:14px}
-.err-box{background:var(--danger-lt);border-left:4px solid #dc3545;border-radius:var(--r);padding:11px 13px;font-size:13px;color:var(--danger)}
-
-/* ── Results list ── */
-.res-item{display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--g100)}
-.res-item:last-child{border-bottom:none}
-.res-ok{color:var(--success);flex-shrink:0;margin-top:1px}
-.res-err{color:#dc3545;flex-shrink:0;margin-top:1px}
-
-/* ── Toast ── */
-.toast-wrap{position:fixed;bottom:22px;right:22px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{padding:11px 16px;border-radius:var(--r);background:var(--g800);color:var(--white);font-size:14px;box-shadow:var(--sh-md);display:flex;align-items:center;gap:10px;min-width:240px;pointer-events:auto;animation:tIn .25s ease}
-@keyframes tIn{from{transform:translateX(110%);opacity:0}to{transform:none;opacity:1}}
-.toast-success{background:#1e7e34}
-.toast-error{background:#c82333}
-.toast-warning{background:#d39e00}
-
-/* ── Misc ── */
-.hidden{display:none!important}
-.flex{display:flex}.fc{display:flex;align-items:center}.gap-8{gap:8px}.gap-12{gap:12px}
-.mb-8{margin-bottom:8px}.mb-12{margin-bottom:12px}.mb-16{margin-bottom:16px}
-.muted{color:var(--g500)}.sm{font-size:12px}.bold{font-weight:600}
-input[type=checkbox]{accent-color:var(--primary);width:15px;height:15px;cursor:pointer}
+thead{position:sticky;top:0;background:#f8f9fa;z-index:1}
+th{padding:9px 11px;text-align:left;font-weight:600;font-size:12px;color:#555;border-bottom:2px solid #e0e0e0;cursor:pointer;white-space:nowrap;user-select:none}
+th:hover{background:#e9ecef}
+th.asc::after{content:' ↑'}th.desc::after{content:' ↓'}
+td{padding:8px 11px;border-bottom:1px solid #f0f0f0;font-size:13px;max-width:300px}
+tr:hover td{background:#f8f9ff}
+tr.sel td{background:#e8f0fe}
+.tags{display:flex;flex-wrap:wrap;gap:3px}
+.tag{background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:10px;font-size:11px;white-space:nowrap}
+/* Action bar */
+.abar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid #f0f0f0}
+.dvd{width:1px;height:30px;background:#ddd}
+/* Multi-select dropdown */
+.msel{position:relative;min-width:190px}
+.mdisp{padding:7px 10px;border:1.5px solid #d0d7de;border-radius:7px;cursor:pointer;font-size:13px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:6px;white-space:nowrap}
+.mdisp:hover{border-color:#0076be}
+.mdrop{position:absolute;top:calc(100% + 3px);left:0;min-width:220px;background:#fff;border:1.5px solid #d0d7de;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:99;max-height:240px;display:none;flex-direction:column}
+.mdrop.open{display:flex}
+.msrch{padding:7px;border-bottom:1px solid #eee;flex-shrink:0}
+.msrch input{width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:5px;font-size:12px;outline:none}
+.mopts{overflow-y:auto}
+.mopt{padding:7px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;user-select:none}
+.mopt:hover{background:#f0f2f5}
+/* Modals */
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center}
+.backdrop.open{display:flex}
+.modal{background:#fff;border-radius:14px;padding:26px;max-width:480px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.modal h3{font-size:17px;margin-bottom:14px}
+.si{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:13px}
+.si:last-child{border:none}
+.si b{text-align:right;max-width:65%}
+.ma{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+/* Progress */
+.pbar{background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;margin:10px 0}
+.pbar div{background:#0076be;height:100%;transition:width .3s;border-radius:6px}
+.pcnt{font-size:12px;text-align:center;color:#666;margin-bottom:4px}
+.plog{max-height:120px;overflow-y:auto;font-size:11px;color:#555;margin-top:6px;line-height:1.6}
+/* Status */
+.sts{padding:9px 13px;border-radius:7px;font-size:12px;margin-top:10px}
+.si_{background:#e3f2fd;color:#1565c0}
+.ss{background:#e8f5e9;color:#2e7d32}
+.se{background:#ffebee;color:#c62828}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid #c0d8f0;border-top-color:#0076be;border-radius:50%;animation:sp .7s linear infinite;vertical-align:middle;margin-right:5px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.nc{text-align:center;padding:32px;color:#aaa}
+.hi{display:none!important}
 </style>
 </head>
 <body>
+<div id="groupManager">
 
-<!-- Header -->
-<header class="hdr">
-<div class="hdr-title">
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-    <circle cx="9" cy="7" r="4"/>
-    <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
-    </svg>
-    Administrador de Grupos — Geotab
-</div>
-</header>
+  <div class="card">
+    <h1>Gestor de Grupos Masivo</h1>
+    <p class="sub">Agregá y eliminá grupos de usuarios y activos en forma masiva</p>
+  </div>
 
-<div class="toast-wrap" id="toastWrap"></div>
-
-<main class="wrap">
-
-<!-- Entity toggle -->
-<div class="toggle" id="toggleEl">
-    <button class="on" data-type="User" onclick="App.setType('User')">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-    </svg>Usuarios
-    </button>
-    <button data-type="Device" onclick="App.setType('Device')">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="1" y="3" width="15" height="13" rx="2"/>
-        <path d="M16 8h4a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1v-5"/>
-    </svg>Activos (Dispositivos)
-    </button>
-</div>
-
-<!-- Filters -->
-<div class="card">
-    <div class="card-hdr">
-    <span class="card-title">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
-        </svg>Filtros
-    </span>
-    <div class="fc gap-8">
-        <button class="btn btn-secondary btn-sm" onclick="App.clearFilters()">Limpiar</button>
-        <button class="btn btn-primary btn-sm" id="loadBtn" onclick="App.load()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/>
-            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15"/>
-        </svg>Cargar datos
-        </button>
+  <div class="card">
+    <div class="tabs">
+      <button class="tab active" data-type="User">Usuarios</button>
+      <button class="tab" data-type="Device">Activos</button>
     </div>
-    </div>
-    <div class="card-body">
-    <div class="fgrid">
-        <div>
-        <div class="flabel">Buscar por nombre</div>
-        <input class="finput" id="fName" type="text" placeholder="Nombre..." autocomplete="off" oninput="App.filter()">
+    <div class="row">
+      <div class="fg">
+        <label>Nombre</label>
+        <input type="text" id="fName" placeholder="Filtrar por nombre...">
+      </div>
+      <div class="fg">
+        <label>Filtrar por grupo</label>
+        <div class="msel">
+          <div class="mdisp" id="md0" tabindex="0"><span id="ml0">Todos los grupos</span><span>▾</span></div>
+          <div class="mdrop" id="mdd0">
+            <div class="msrch"><input type="text" id="ms0s" placeholder="Buscar grupo..."></div>
+            <div class="mopts" id="ms0o"></div>
+          </div>
         </div>
-        <div>
-        <div class="flabel">Filtrar por grupos</div>
-        <div class="ms" id="msFilterWrap">
-            <div class="ms-trigger" id="msFilterTrigger" tabindex="0" onclick="MS.toggle('filter')">
-            <div class="ms-tags" id="msFilterTags"><span class="ms-placeholder">Todos los grupos...</span></div>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-            </div>
-            <div class="ms-drop hidden" id="msFilterDrop">
-            <div class="ms-search"><input type="text" id="msFilterSearch" placeholder="Buscar..." oninput="MS.search(this.value,'msFilterList')" autocomplete="off"></div>
-            <div class="ms-list" id="msFilterList"></div>
-            </div>
+      </div>
+      <button class="bp" id="btnLoad">Cargar datos</button>
+      <button class="bs" id="btnClr">Limpiar filtros</button>
+    </div>
+    <div id="sts" class="sts hi"></div>
+  </div>
+
+  <div class="card hi" id="tcard">
+    <div class="ttop">
+      <span class="cnt"><b id="cSel">0</b> seleccionados / <b id="cTot">0</b> registros</span>
+      <div style="display:flex;gap:6px">
+        <button class="bs" id="btnSA">Seleccionar todos</button>
+        <button class="bs" id="btnDA">Deseleccionar</button>
+      </div>
+    </div>
+    <div class="tw">
+      <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    </div>
+    <div class="abar">
+      <div class="row" style="gap:8px;align-items:center">
+        <div class="msel">
+          <div class="mdisp" id="md1" tabindex="0"><span id="ml1">Grupos a agregar</span><span>▾</span></div>
+          <div class="mdrop" id="mdd1">
+            <div class="msrch"><input type="text" id="ms1s" placeholder="Buscar..."></div>
+            <div class="mopts" id="ms1o"></div>
+          </div>
         </div>
+        <button class="bg" id="btnAdd">Agregar grupos</button>
+      </div>
+      <div class="dvd"></div>
+      <div class="row" style="gap:8px;align-items:center">
+        <div class="msel">
+          <div class="mdisp" id="md2" tabindex="0"><span id="ml2">Grupos a eliminar</span><span>▾</span></div>
+          <div class="mdrop" id="mdd2">
+            <div class="msrch"><input type="text" id="ms2s" placeholder="Buscar..."></div>
+            <div class="mopts" id="ms2o"></div>
+          </div>
         </div>
-        <div>
-        <div class="flabel">Estado</div>
-        <select class="finput" id="fStatus" onchange="App.filter()">
-            <option value="">Todos</option>
-            <option value="active">Activo</option>
-            <option value="inactive">Inactivo</option>
-        </select>
-        </div>
-        <div style="align-self:end">
-        <div class="flabel" style="visibility:hidden">·</div>
-        <label class="fc gap-8" style="cursor:pointer;white-space:nowrap">
-            <input type="checkbox" id="fNoGroups" onchange="App.filter()">
-            <span style="font-size:13px">Sin grupos</span>
-        </label>
-        </div>
+        <button class="br" id="btnRem">Eliminar grupos</button>
+      </div>
     </div>
-    </div>
-</div>
+  </div>
 
-<!-- Table -->
-<div class="card">
-    <div class="card-hdr">
-    <span class="card-title" id="tblTitle">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
-        <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
-        <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-        </svg><span id="tblTitleText">Usuarios</span>
-    </span>
-    <div class="fc gap-12">
-        <span class="muted sm" id="recCount">0 registros</span>
-        <label class="fc gap-8 sm" style="cursor:pointer">
-        <input type="checkbox" id="chkAllFiltered" onchange="App.selAllFiltered(this.checked)">
-        Selec. todos filtrados
-        </label>
+  <!-- Confirmation modal -->
+  <div class="backdrop" id="mConf">
+    <div class="modal">
+      <h3>Confirmar operación</h3>
+      <div id="confSum"></div>
+      <div class="ma">
+        <button class="bs" id="btnCC">Cancelar</button>
+        <button class="bp" id="btnOK">Confirmar y ejecutar</button>
+      </div>
     </div>
-    </div>
-    <div id="tblContent">
-    <div class="empty">
-        <div class="empty-ico">📋</div>
-        <h3>Sin datos cargados</h3>
-        <p>Presiona "Cargar datos" para obtener registros de Geotab.</p>
-    </div>
-    </div>
-    <div id="pgnWrap" class="hidden" style="padding:12px 18px;border-top:1px solid var(--g200)">
-    <div class="fc" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
-        <span class="muted sm" id="pgnInfo"></span>
-        <div class="pgn" id="pgnCtrl"></div>
-    </div>
-    </div>
-</div>
+  </div>
 
-<!-- Selection bar -->
-<div class="sel-bar hidden" id="selBar">
-    <div class="sel-info"><span id="selCnt">0</span> elemento(s) seleccionado(s)</div>
-    <div class="sel-actions">
-    <button class="btn btn-ghost btn-sm" onclick="App.clearSel()">Deseleccionar todo</button>
-    <button class="btn btn-white btn-sm" onclick="GroupOp.open('add')">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
-        </svg>Agregar grupos
-    </button>
-    <button class="btn btn-danger btn-sm" onclick="GroupOp.open('remove')">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/>
-        </svg>Eliminar grupos
-    </button>
+  <!-- Progress modal -->
+  <div class="backdrop" id="mProg">
+    <div class="modal">
+      <h3 id="progTitle">Procesando...</h3>
+      <div class="pbar"><div id="pbar" style="width:0"></div></div>
+      <p class="pcnt" id="progTxt">0 / 0</p>
+      <div class="plog" id="plog"></div>
+      <div class="ma"><button class="bs hi" id="btnCP">Cerrar</button></div>
     </div>
-</div>
+  </div>
 
-</main>
-
-<!-- ════ MODAL: Group picker ════ -->
-<div class="overlay hidden" id="mGroup">
-<div class="modal">
-    <div class="m-hdr">
-    <span class="m-title" id="mGroupTitle">Seleccionar grupos</span>
-    <button class="m-close" onclick="GroupOp.close()">✕</button>
-    </div>
-    <div class="m-body">
-    <div class="info-box" id="mGroupInfo"></div>
-    <div class="mb-12">
-        <div class="flabel mb-8">Buscar grupo</div>
-        <input class="finput" id="mGroupSearch" type="text" placeholder="Nombre del grupo..." oninput="MS.search(this.value,'mGroupList')" autocomplete="off">
-    </div>
-    <div style="border:1px solid var(--g200);border-radius:var(--r);max-height:300px;overflow-y:auto">
-        <div id="mGroupList"></div>
-    </div>
-    </div>
-    <div class="m-foot">
-    <button class="btn btn-secondary" onclick="GroupOp.close()">Cancelar</button>
-    <button class="btn btn-primary" id="mGroupOkBtn" onclick="GroupOp.confirm()">Continuar</button>
-    </div>
 </div>
-</div>
-
-<!-- ════ MODAL: Confirmation ════ -->
-<div class="overlay hidden" id="mConfirm">
-<div class="modal">
-    <div class="m-hdr">
-    <span class="m-title">Confirmar operación</span>
-    <button class="m-close" onclick="Confirm.close()">✕</button>
-    </div>
-    <div class="m-body" id="mConfirmBody"></div>
-    <div class="m-foot">
-    <button class="btn btn-secondary" onclick="Confirm.close()">Cancelar</button>
-    <button class="btn btn-primary" id="mConfirmOkBtn" onclick="Executor.run()">Confirmar y ejecutar</button>
-    </div>
-</div>
-</div>
-
-<!-- ════ MODAL: Progress ════ -->
-<div class="overlay hidden" id="mProgress">
-<div class="modal" style="max-width:420px">
-    <div class="m-hdr"><span class="m-title">Procesando...</span></div>
-    <div class="m-body" style="text-align:center;padding:28px 24px">
-    <div class="spinner"></div>
-    <div id="progMsg" style="font-size:14px;color:var(--g700);margin-bottom:18px">Preparando...</div>
-    <div class="progress-wrap"><div class="progress-fill" id="progFill" style="width:0%"></div></div>
-    <div class="progress-txt" id="progTxt">0 / 0</div>
-    </div>
-</div>
-</div>
-
-<!-- ════ MODAL: Results ════ -->
-<div class="overlay hidden" id="mResults">
-<div class="modal modal-lg">
-    <div class="m-hdr">
-    <span class="m-title">Resultado de la operación</span>
-    <button class="m-close" onclick="Results.close()">✕</button>
-    </div>
-    <div class="m-body" id="mResultsBody"></div>
-    <div class="m-foot">
-    <button class="btn btn-secondary" onclick="Results.close()">Cerrar sin recargar</button>
-    <button class="btn btn-primary" onclick="Results.closeReload()">Cerrar y recargar</button>
-    </div>
-</div>
-</div>
-
 <script>
-'use strict';
-let api = null;
-let state = null;
+(function () {
+  var api, entityType = 'User';
+  var allE = [], allG = [], filtered = [], selIds = new Set();
+  var gs = [new Set(), new Set(), new Set()]; // [filterGroups, addGroups, removeGroups]
+  var sortC = 'name', sortD = 1, pendingOp = null;
+  var $ = function (id) { return document.getElementById(id); };
 
-/* ════════════════════════════════════════════
-CONFIGURATION
-════════════════════════════════════════════ */
-const CFG = {
-PAGE: 50,
-RETRIES: 3,
-RETRY_MS: 1200,
-CONCURRENCY: 8,
-BADGE_MAX: 3
-};
+  // ─── MultiSelect ───────────────────────────────────────────────────────────
+  function MS(idx, placeholder, onChange) {
+    var sel = gs[idx];
+    var disp = $('md' + idx), lbl = $('ml' + idx), drop = $('mdd' + idx);
+    var srch = $('ms' + idx + 's'), opts = $('ms' + idx + 'o');
+    var items = [];
 
-/* ════════════════════════════════════════════
-STATE
-════════════════════════════════════════════ */
-const S = {
-api: null,
-type: 'User',
-raw: [],
-filtered: [],
-sel: new Set(),
-groups: [],
-gMap: {},     // id → group obj
-page: 1,
-sortCol: 'name',
-sortDir: 'asc',
-filterGroups: [],   // selected group IDs for filter
-pending: null,      // { action, groupIds }
+    disp.addEventListener('click', function (e) { e.stopPropagation(); toggle(); });
+    srch.addEventListener('input', render);
+    document.addEventListener('click', function () { drop.classList.remove('open'); });
+    drop.addEventListener('click', function (e) { e.stopPropagation(); });
 
-get totalPages() { return Math.max(1, Math.ceil(this.filtered.length / CFG.PAGE)); },
-get paged() {
-    const s = (this.page - 1) * CFG.PAGE;
-    return this.filtered.slice(s, s + CFG.PAGE);
-}
-};
+    function toggle() { drop.classList.toggle('open'); if (drop.classList.contains('open')) { srch.focus(); render(); } }
 
-/* ════════════════════════════════════════════
-API SERVICE
-════════════════════════════════════════════ */
-const API = {
-init(api) { S.api = api; },
-
-call(method, params) {
-    return new Promise((res, rej) => {
-    try { S.api.call(method, params, res, rej); }
-    catch(e) { rej(e); }
-    });
-},
-
-async retry(method, params, attempts = CFG.RETRIES) {
-    for (let i = 0; i <= attempts; i++) {
-    try { return await this.call(method, params); }
-    catch(e) {
-        const msg = String(e || '');
-        const fatal = /MissingMandatory|InvalidUser|NotFound|permission/i.test(msg);
-        if (i === attempts || fatal) throw e;
-        await sleep(CFG.RETRY_MS * (i + 1));
+    function render() {
+      var q = srch.value.toLowerCase();
+      opts.innerHTML = items
+        .filter(function (g) { return g.name.toLowerCase().includes(q); })
+        .map(function (g) {
+          return '<div class="mopt" data-id="' + g.id + '"><input type="checkbox"' + (sel.has(g.id) ? ' checked' : '') + '>' + esc(g.name) + '</div>';
+        }).join('');
+      opts.querySelectorAll('.mopt').forEach(function (d) {
+        d.addEventListener('click', function (e) {
+          e.preventDefault();
+          var id = this.dataset.id, chk = this.querySelector('input');
+          sel.has(id) ? (sel.delete(id), chk.checked = false) : (sel.add(id), chk.checked = true);
+          lbl.textContent = sel.size ? sel.size + ' grupo(s)' : placeholder;
+          if (onChange) onChange();
+        });
+      });
     }
-    }
-},
 
-async getGroups() {
-    return await this.retry('Get', { typeName: 'Group', resultsLimit: 10000 }) || [];
-},
+    return {
+      setItems: function (arr) { items = arr; render(); },
+      clear: function () { sel.clear(); lbl.textContent = placeholder; render(); }
+    };
+  }
 
-async getEntities(type) {
-    const params = { typeName: type, resultsLimit: 50000 };
-    return await this.retry('Get', params) || [];
-},
+  var ms = [];
 
-async setEntity(type, entity) {
-    return await this.retry('Set', { typeName: type, entity });
-}
-};
+  // ─── Init ──────────────────────────────────────────────────────────────────
+  function init() {
+    ms[0] = MS(0, 'Todos los grupos', applyFilter);
+    ms[1] = MS(1, 'Grupos a agregar');
+    ms[2] = MS(2, 'Grupos a eliminar');
 
-/* ════════════════════════════════════════════
-HELPERS
-════════════════════════════════════════════ */
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-function esc(s) {
-if (s == null) return '';
-return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
-function trunc(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
-function gName(id) { const g = S.gMap[id]; return g ? (g.name || id) : id; }
-function isActive(e) {
-const now = Date.now();
-const from = e.activeFrom ? new Date(e.activeFrom).getTime() : 0;
-const to = e.activeTo ? new Date(e.activeTo).getTime() : Infinity;
-return from <= now && now <= to;
-}
-function pgnPages(cur, tot) {
-if (tot <= 7) return Array.from({length: tot}, (_, i) => i + 1);
-const p = [];
-if (cur <= 4) { for (let i=1;i<=5;i++) p.push(i); p.push('…'); p.push(tot); }
-else if (cur >= tot - 3) { p.push(1); p.push('…'); for (let i=tot-4;i<=tot;i++) p.push(i); }
-else { p.push(1); p.push('…'); p.push(cur-1,cur,cur+1); p.push('…'); p.push(tot); }
-return p;
-}
-
-/* ════════════════════════════════════════════
-MULTI-SELECT COMPONENT
-════════════════════════════════════════════ */
-const MS = {
-_filter: new Set(),    // selected IDs for filter dropdown
-_group: new Set(),     // selected IDs for group modal
-
-renderList(containerId, groups, selectedSet, onChange) {
-    const el = document.getElementById(containerId);
-    if (!groups.length) { el.innerHTML = '<div class="ms-empty">Sin grupos disponibles</div>'; return; }
-    const sorted = [...groups].sort((a,b) => (a.name||'').localeCompare(b.name||''));
-    el.innerHTML = sorted.map(g => `
-    <label class="ms-opt" data-id="${esc(g.id)}">
-        <input type="checkbox" value="${esc(g.id)}" ${selectedSet.has(g.id)?'checked':''}>
-        ${esc(g.name || g.id)}
-    </label>`).join('');
-    // event delegation
-    el.addEventListener('change', ev => {
-    const cb = ev.target;
-    if (cb.type !== 'checkbox') return;
-    const id = cb.value;
-    if (cb.checked) selectedSet.add(id); else selectedSet.delete(id);
-    if (onChange) onChange(id, cb.checked);
-    }, {once: false}); // Note: multiple renders = multiple listeners, cleared by innerHTML
-},
-
-renderFilterList() {
-    this.renderList('msFilterList', S.groups, this._filter, () => {
-    this._updateFilterTags();
-    App.filter();
-    });
-},
-
-renderGroupList() {
-    this.renderList('mGroupList', S.groups, this._group, null);
-},
-
-toggle(which) {
-    if (which === 'filter') {
-    const drop = document.getElementById('msFilterDrop');
-    const trig = document.getElementById('msFilterTrigger');
-    const hidden = drop.classList.contains('hidden');
-    drop.classList.toggle('hidden', !hidden);
-    trig.classList.toggle('open', hidden);
-    if (hidden) setTimeout(() => document.getElementById('msFilterSearch').focus(), 50);
-    }
-},
-
-search(val, listId) {
-    const q = val.toLowerCase();
-    document.querySelectorAll(`#${listId} .ms-opt`).forEach(opt => {
-    opt.style.display = opt.textContent.toLowerCase().includes(q) ? '' : 'none';
-    });
-},
-
-_updateFilterTags() {
-    const el = document.getElementById('msFilterTags');
-    if (!this._filter.size) {
-    el.innerHTML = '<span class="ms-placeholder">Todos los grupos...</span>';
-    S.filterGroups = [];
-    return;
-    }
-    S.filterGroups = [...this._filter];
-    el.innerHTML = [...this._filter].map(id => {
-    const name = gName(id);
-    return `<span class="tag">${esc(trunc(name,18))}<span class="tag-x" onclick="MS._removeFilter('${esc(id)}')">✕</span></span>`;
-    }).join('');
-},
-
-_removeFilter(id) {
-    this._filter.delete(id);
-    const cb = document.querySelector(`#msFilterList input[value="${id}"]`);
-    if (cb) cb.checked = false;
-    this._updateFilterTags();
-    App.filter();
-},
-
-resetGroup() {
-    this._group.clear();
-    // uncheck all in modal list
-    document.querySelectorAll('#mGroupList input[type=checkbox]').forEach(cb => cb.checked = false);
-},
-
-getGroupSelected() { return [...this._group]; }
-};
-
-// Close filter dropdown on outside click
-document.addEventListener('click', e => {
-const wrap = document.getElementById('msFilterWrap');
-if (wrap && !wrap.contains(e.target)) {
-    document.getElementById('msFilterDrop').classList.add('hidden');
-    document.getElementById('msFilterTrigger').classList.remove('open');
-}
-});
-
-/* ════════════════════════════════════════════
-FILTER + SORT ENGINE
-════════════════════════════════════════════ */
-const Filter = {
-apply() {
-    const name = document.getElementById('fName').value.trim().toLowerCase();
-    const status = document.getElementById('fStatus').value;
-    const noGroups = document.getElementById('fNoGroups').checked;
-    const gids = S.filterGroups;
-
-    let r = S.raw;
-
-    if (name) r = r.filter(e => (e.name||'').toLowerCase().includes(name));
-
-    if (gids.length) r = r.filter(e => {
-    const ids = (e.groups||[]).map(g => g.id);
-    return gids.some(id => ids.includes(id));
+    document.querySelectorAll('.tab').forEach(function (t) {
+      t.addEventListener('click', function () {
+        document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
+        this.classList.add('active');
+        entityType = this.dataset.type;
+        reset();
+      });
     });
 
-    if (status === 'active')   r = r.filter(e => isActive(e));
-    if (status === 'inactive') r = r.filter(e => !isActive(e));
-    if (noGroups) r = r.filter(e => !(e.groups||[]).length);
+    $('fName').addEventListener('input', applyFilter);
+    $('btnLoad').addEventListener('click', loadData);
+    $('btnClr').addEventListener('click', function () { $('fName').value = ''; gs[0].clear(); ms[0].clear(); applyFilter(); });
+    $('btnSA').addEventListener('click', function () { filtered.forEach(function (e) { selIds.add(e.id); }); renderTable(); });
+    $('btnDA').addEventListener('click', function () { selIds.clear(); renderTable(); });
+    $('btnAdd').addEventListener('click', function () { confirmOp('add'); });
+    $('btnRem').addEventListener('click', function () { confirmOp('remove'); });
+    $('btnCC').addEventListener('click', function () { $('mConf').classList.remove('open'); });
+    $('btnOK').addEventListener('click', execOp);
+    $('btnCP').addEventListener('click', function () { $('mProg').classList.remove('open'); });
+  }
 
-    // Sort
-    const col = S.sortCol, dir = S.sortDir === 'asc' ? 1 : -1;
-    r = [...r].sort((a, b) => {
-    if (col === 'name') return dir * (a.name||'').localeCompare(b.name||'');
-    if (col === 'groups') return dir * ((a.groups||[]).length - (b.groups||[]).length);
-    if (col === 'status') return dir * ((isActive(a)?1:0) - (isActive(b)?1:0));
-    return 0;
+  function reset() {
+    allE = []; filtered = []; selIds.clear();
+    ms.forEach(function (m) { if (m) m.clear(); });
+    $('tcard').classList.add('hi');
+    $('sts').classList.add('hi');
+    $('fName').value = '';
+  }
+
+  function setStatus(cls, msg) {
+    var el = $('sts'); el.className = 'sts ' + cls; el.innerHTML = msg; el.classList.remove('hi');
+  }
+
+  // ─── Load Data ─────────────────────────────────────────────────────────────
+  function loadData() {
+    setStatus('si_', '<span class="spin"></span> Cargando datos...');
+    $('btnLoad').disabled = true;
+
+    api.call('Get', { typeName: 'Group' }, function (groups) {
+      allG = groups
+        .filter(function (g) { return g.name; })
+        .sort(function (a, b) { return a.name.localeCompare(b.name); });
+
+      ms.forEach(function (m) { if (m) m.setItems(allG); });
+
+      api.call('Get', { typeName: entityType, resultsLimit: 50000 }, function (entities) {
+        allE = entities;
+        $('btnLoad').disabled = false;
+        setStatus('ss', '✅ ' + entities.length + ' ' + (entityType === 'User' ? 'usuarios' : 'activos') + ' · ' + allG.length + ' grupos disponibles');
+        applyFilter();
+        $('tcard').classList.remove('hi');
+      }, function (err) {
+        $('btnLoad').disabled = false;
+        setStatus('se', '❌ Error al cargar ' + entityType + ': ' + err);
+      });
+    }, function (err) {
+      $('btnLoad').disabled = false;
+      setStatus('se', '❌ Error al cargar grupos: ' + err);
+    });
+  }
+
+  // ─── Filter & Table ────────────────────────────────────────────────────────
+  function applyFilter() {
+    var q = $('fName').value.toLowerCase();
+    var gf = Array.from(gs[0]);
+    filtered = allE.filter(function (e) {
+      if (q && !(e.name || '').toLowerCase().includes(q)) return false;
+      if (gf.length) {
+        var eg = (e.groups || []).map(function (g) { return g.id; });
+        if (!gf.some(function (id) { return eg.indexOf(id) > -1; })) return false;
+      }
+      return true;
+    });
+    renderTable();
+  }
+
+  var colDefs = {
+    User: [['name', 'Nombre'], ['userName', 'Usuario'], ['groups', 'Grupos']],
+    Device: [['name', 'Nombre'], ['serialNumber', 'N/S'], ['groups', 'Grupos']]
+  };
+
+  function renderTable() {
+    var cols = colDefs[entityType];
+    var sorted = filtered.slice().sort(function (a, b) {
+      var va = (a[sortC] || '').toString().toLowerCase();
+      var vb = (b[sortC] || '').toString().toLowerCase();
+      return va < vb ? -sortD : va > vb ? sortD : 0;
     });
 
-    S.filtered = r;
-    S.page = 1;
-}
-};
+    var gMap = {};
+    allG.forEach(function (g) { gMap[g.id] = g.name; });
 
-/* ════════════════════════════════════════════
-TABLE RENDERER
-════════════════════════════════════════════ */
-const Tbl = {
-render() {
-    const el = document.getElementById('tblContent');
-    const pgn = document.getElementById('pgnWrap');
+    // Header
+    $('thead').innerHTML = '<tr><th><input type="checkbox" id="chkA"></th>'
+      + cols.map(function (c) {
+        var cls = sortC === c[0] ? (sortD > 0 ? 'asc' : 'desc') : '';
+        return '<th class="' + cls + '" data-col="' + c[0] + '">' + c[1] + '</th>';
+      }).join('') + '</tr>';
 
-    if (!S.raw.length) {
-    el.innerHTML = `<div class="empty"><div class="empty-ico">📋</div><h3>Sin datos cargados</h3><p>Presiona "Cargar datos" para obtener registros de Geotab.</p></div>`;
-    pgn.classList.add('hidden');
-    this._count();
-    return;
-    }
-    if (!S.filtered.length) {
-    el.innerHTML = `<div class="empty"><div class="empty-ico">🔍</div><h3>Sin resultados</h3><p>Ajusta los filtros para ver registros.</p></div>`;
-    pgn.classList.add('hidden');
-    this._count();
-    return;
-    }
-
-    const isUser = S.type === 'User';
-    const si = col => `<i class="sort-i">${S.sortCol===col ? (S.sortDir==='asc'?'↑':'↓') : '↕'}</i>`;
-
-    let h = `<div class="tbl-wrap"><table><thead><tr>
-    <th style="width:40px"><input type="checkbox" id="chkPage" onchange="App.selPage(this.checked)" title="Selec. página"></th>
-    <th class="sortable${S.sortCol==='name'?' sorted':''}" onclick="App.sort('name')">${isUser?'Usuario':'Dispositivo'} ${si('name')}</th>
-    <th>ID</th>
-    <th class="sortable${S.sortCol==='groups'?' sorted':''}" onclick="App.sort('groups')">Grupos ${si('groups')}</th>
-    <th class="sortable${S.sortCol==='status'?' sorted':''}" onclick="App.sort('status')">Estado ${si('status')}</th>
-    </tr></thead><tbody>`;
-
-    for (const e of S.paged) {
-    const sel = S.sel.has(e.id);
-    const active = isActive(e);
-    const grps = e.groups || [];
-
-    let gbHtml = '';
-    for (let i = 0; i < Math.min(grps.length, CFG.BADGE_MAX); i++) {
-        const n = gName(grps[i].id);
-        gbHtml += `<span class="gbadge" title="${esc(n)}">${esc(trunc(n,26))}</span>`;
-    }
-    if (grps.length > CFG.BADGE_MAX) gbHtml += `<span class="gbadge gbadge-more">+${grps.length-CFG.BADGE_MAX} más</span>`;
-    if (!grps.length) gbHtml = '<span class="gbadge-none">Sin grupos</span>';
-
-    let sub = '';
-    if (isUser) {
-        const full = [e.firstName, e.lastName].filter(Boolean).join(' ');
-        if (full && full !== e.name) sub = `<div class="td-sub">${esc(full)}</div>`;
-    }
-
-    h += `<tr class="${sel?'sel':''}" data-id="${esc(e.id)}">
-        <td><input type="checkbox" ${sel?'checked':''} onchange="App.selOne('${esc(e.id)}',this.checked)"></td>
-        <td><div class="td-name">${esc(e.name||'(sin nombre)')}</div>${sub}</td>
-        <td class="muted sm" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(e.id)}</td>
-        <td><div class="gbadges">${gbHtml}</div></td>
-        <td><span class="sbadge ${active?'s-on':'s-off'}">${active?'● Activo':'● Inactivo'}</span></td>
-    </tr>`;
-    }
-    h += '</tbody></table></div>';
-    el.innerHTML = h;
-
-    this._count();
-    this._pageCheck();
-    this._pgn();
-    pgn.classList.remove('hidden');
-},
-
-_count() {
-    document.getElementById('recCount').textContent = `${S.filtered.length} de ${S.raw.length} registros`;
-    document.getElementById('tblTitleText').textContent = S.type === 'User' ? 'Usuarios' : 'Activos (Dispositivos)';
-},
-
-_pageCheck() {
-    const cb = document.getElementById('chkPage');
-    if (!cb) return;
-    const ids = S.paged.map(e => e.id);
-    const all = ids.length && ids.every(id => S.sel.has(id));
-    const some = ids.some(id => S.sel.has(id));
-    cb.checked = all;
-    cb.indeterminate = !all && some;
-},
-
-_pgn() {
-    const tot = S.totalPages;
-    const cur = S.page;
-    const s = (cur-1)*CFG.PAGE+1, en = Math.min(cur*CFG.PAGE, S.filtered.length);
-    document.getElementById('pgnInfo').textContent = `Mostrando ${s}–${en} de ${S.filtered.length}`;
-
-    let h = `<button class="pg-btn" ${cur<=1?'disabled':''} onclick="App.goPage(${cur-1})">‹</button>`;
-    for (const p of pgnPages(cur, tot)) {
-    if (p === '…') h += `<span class="pg-btn" style="border:none;cursor:default">…</span>`;
-    else h += `<button class="pg-btn${p===cur?' on':''}" onclick="App.goPage(${p})">${p}</button>`;
-    }
-    h += `<button class="pg-btn" ${cur>=tot?'disabled':''} onclick="App.goPage(${cur+1})">›</button>`;
-    document.getElementById('pgnCtrl').innerHTML = h;
-}
-};
-
-/* ════════════════════════════════════════════
-SELECTION BAR
-════════════════════════════════════════════ */
-function updateSelBar() {
-const n = S.sel.size;
-document.getElementById('selCnt').textContent = n;
-document.getElementById('selBar').classList.toggle('hidden', n === 0);
-}
-
-/* ════════════════════════════════════════════
-GROUP OPERATION (add / remove)
-════════════════════════════════════════════ */
-const GroupOp = {
-_action: null,
-
-open(action) {
-    this._action = action;
-    MS.resetGroup();
-
-    const isAdd = action === 'add';
-    document.getElementById('mGroupTitle').textContent = isAdd ? 'Agregar grupos a la selección' : 'Eliminar grupos de la selección';
-    document.getElementById('mGroupInfo').innerHTML = `<strong>${S.sel.size}</strong> entidad(es) seleccionada(s). Elige los grupos a <strong>${isAdd ? 'agregar' : 'eliminar'}</strong>.`;
-    document.getElementById('mGroupSearch').value = '';
-    const btn = document.getElementById('mGroupOkBtn');
-    btn.className = isAdd ? 'btn btn-success' : 'btn btn-danger';
-    btn.textContent = isAdd ? 'Agregar grupos' : 'Eliminar grupos';
-
-    MS.renderGroupList();
-    document.getElementById('mGroup').classList.remove('hidden');
-},
-
-close() { document.getElementById('mGroup').classList.add('hidden'); },
-
-confirm() {
-    const ids = MS.getGroupSelected();
-    if (!ids.length) { Toast.show('Selecciona al menos un grupo', 'warning'); return; }
-    this.close();
-    Confirm.show(this._action, ids);
-}
-};
-
-/* ════════════════════════════════════════════
-CONFIRMATION MODAL
-════════════════════════════════════════════ */
-const Confirm = {
-show(action, groupIds) {
-    const names = groupIds.map(gName);
-    const cnt = S.sel.size;
-    const eLabel = S.type === 'User' ? 'usuario(s)' : 'dispositivo(s)';
-    const isAdd = action === 'add';
-    const color = isAdd ? 'var(--success)' : '#dc3545';
-
-    S.pending = { action, groupIds };
-
-    document.getElementById('mConfirmBody').innerHTML = `
-    <div class="sum-box">
-        <div class="sum-lbl">Entidades afectadas</div>
-        <div class="sum-num">${cnt}</div>
-        <div style="font-size:13px;color:var(--g600)">${eLabel} serán modificados</div>
-    </div>
-    <div class="sum-box">
-        <div class="sum-lbl">Operación</div>
-        <div style="font-size:18px;font-weight:700;color:${color}">${isAdd ? '+ AGREGAR GRUPOS' : '− ELIMINAR GRUPOS'}</div>
-    </div>
-    <div class="sum-box">
-        <div class="sum-lbl">Grupos seleccionados (${groupIds.length})</div>
-        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px">
-        ${names.map(n => `<span class="gbadge" style="font-size:13px">${esc(n)}</span>`).join('')}
-        </div>
-    </div>
-    <div class="warn-box">⚠ Esta operación modificará registros directamente en Geotab. Verifica la selección antes de continuar.</div>`;
-
-    const btn = document.getElementById('mConfirmOkBtn');
-    btn.className = isAdd ? 'btn btn-success' : 'btn btn-danger';
-    btn.textContent = isAdd ? 'Confirmar y agregar' : 'Confirmar y eliminar';
-
-    document.getElementById('mConfirm').classList.remove('hidden');
-},
-
-close() {
-    document.getElementById('mConfirm').classList.add('hidden');
-    S.pending = null;
-}
-};
-
-/* ════════════════════════════════════════════
-EXECUTOR (batch apply)
-════════════════════════════════════════════ */
-const Executor = {
-async run() {
-    const op = S.pending;
-    if (!op) return;
-    Confirm.close();
-
-    const entities = S.raw.filter(e => S.sel.has(e.id));
-    const total = entities.length;
-    const isAdd = op.action === 'add';
-
-    document.getElementById('progMsg').textContent = isAdd ? 'Agregando grupos...' : 'Eliminando grupos...';
-    document.getElementById('progFill').style.width = '0%';
-    document.getElementById('progTxt').textContent = `0 / ${total}`;
-    document.getElementById('mProgress').classList.remove('hidden');
-
-    let done = 0, success = 0;
-    const errors = [];
-
-    // Process in concurrent batches
-    for (let i = 0; i < entities.length; i += CFG.CONCURRENCY) {
-    const batch = entities.slice(i, i + CFG.CONCURRENCY);
-    await Promise.all(batch.map(async entity => {
-        try {
-        const updated = this._applyOp(entity, op.action, op.groupIds);
-        await API.setEntity(S.type, updated);
-        success++;
-        } catch(e) {
-        errors.push({ name: entity.name || entity.id, error: String(e) });
-        }
-        done++;
-        const pct = Math.round(done / total * 100);
-        document.getElementById('progFill').style.width = pct + '%';
-        document.getElementById('progTxt').textContent = `${done} / ${total}`;
-    }));
-    }
-
-    document.getElementById('mProgress').classList.add('hidden');
-
-    const groupNames = op.groupIds.map(gName);
-    Results.show({ success, errors, action: op.action, groupNames });
-
-    S.pending = null;
-    S.sel.clear();
-    updateSelBar();
-
-    const msg = errors.length
-    ? `Completado: ${success} exitosos, ${errors.length} errores`
-    : `Operación completada: ${success} entidades modificadas`;
-    Toast.show(msg, errors.length ? 'warning' : 'success');
-},
-
-_applyOp(entity, action, groupIds) {
-    const cur = entity.groups || [];
-    let groups;
-    if (action === 'add') {
-    const existing = new Set(cur.map(g => g.id));
-    const toAdd = groupIds.filter(id => !existing.has(id)).map(id => ({ id }));
-    groups = [...cur, ...toAdd];
+    // Body
+    if (!sorted.length) {
+      $('tbody').innerHTML = '<tr><td colspan="' + (cols.length + 1) + '" class="nc">Sin resultados para los filtros aplicados</td></tr>';
     } else {
-    const remove = new Set(groupIds);
-    groups = cur.filter(g => !remove.has(g.id));
-    }
-    return { ...entity, groups };
-}
-};
-
-/* ════════════════════════════════════════════
-RESULTS MODAL
-════════════════════════════════════════════ */
-const Results = {
-show({ success, errors, action, groupNames }) {
-    const total = success + errors.length;
-    const isAdd = action === 'add';
-
-    let h = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-        <div class="sum-box" style="text-align:center">
-        <div class="sum-lbl">Exitosos</div>
-        <div class="sum-num" style="color:var(--success)">${success}</div>
-        </div>
-        <div class="sum-box" style="text-align:center">
-        <div class="sum-lbl">Con error</div>
-        <div class="sum-num" style="color:${errors.length?'#dc3545':'var(--g400)'}">${errors.length}</div>
-        </div>
-    </div>
-    <div class="sum-box">
-        <div class="sum-lbl">Operación</div>
-        <div style="font-size:13px;margin-top:4px">
-        <strong>${isAdd ? 'Grupos agregados' : 'Grupos eliminados'}:</strong>
-        ${groupNames.map(n => `<span class="gbadge" style="font-size:12px">${esc(n)}</span>`).join(' ')}
-        </div>
-    </div>`;
-
-    if (errors.length) {
-    h += `<div class="sum-box" style="border-color:#dc3545;background:var(--danger-lt)">
-        <div class="sum-lbl" style="color:#dc3545">Errores (${errors.length})</div>
-        <div style="max-height:200px;overflow-y:auto;margin-top:8px">
-        ${errors.map(e => `<div class="res-item">
-            <span class="res-err">✕</span>
-            <span class="bold">${esc(e.name)}</span>
-            <span class="muted sm">— ${esc(e.error)}</span>
-        </div>`).join('')}
-        </div>
-    </div>`;
+      $('tbody').innerHTML = sorted.map(function (e) {
+        var tags = (e.groups || []).map(function (g) {
+          return gMap[g.id] ? '<span class="tag">' + esc(gMap[g.id]) + '</span>' : '';
+        }).join('');
+        return '<tr class="' + (selIds.has(e.id) ? 'sel' : '') + '" data-id="' + e.id + '">'
+          + '<td><input type="checkbox"' + (selIds.has(e.id) ? ' checked' : '') + '></td>'
+          + cols.map(function (c) {
+            if (c[0] === 'groups') return '<td><div class="tags">' + (tags || '<span style="color:#ccc">—</span>') + '</div></td>';
+            return '<td>' + esc(e[c[0]] || '') + '</td>';
+          }).join('') + '</tr>';
+      }).join('');
     }
 
-    document.getElementById('mResultsBody').innerHTML = h;
-    document.getElementById('mResults').classList.remove('hidden');
-},
+    // Sort click
+    $('thead').querySelectorAll('th[data-col]').forEach(function (th) {
+      th.addEventListener('click', function () {
+        sortC === this.dataset.col ? sortD *= -1 : (sortC = this.dataset.col, sortD = 1);
+        renderTable();
+      });
+    });
 
-close() { document.getElementById('mResults').classList.add('hidden'); },
-closeReload() { this.close(); App.load(); }
-};
+    // Select-all header checkbox
+    var ca = $('chkA');
+    if (ca) ca.addEventListener('change', function () {
+      if (this.checked) filtered.forEach(function (e) { selIds.add(e.id); });
+      else selIds.clear();
+      renderTable();
+    });
 
-/* ════════════════════════════════════════════
-TOAST
-════════════════════════════════════════════ */
-const Toast = {
-show(msg, type = 'info', ms = 4000) {
-    const c = document.getElementById('toastWrap');
-    const t = document.createElement('div');
-    const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
-    t.className = `toast toast-${type}`;
-    t.innerHTML = `<span>${icons[type]||'ℹ'}</span><span>${esc(msg)}</span>`;
-    c.appendChild(t);
-    setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),350); }, ms);
-}
-};
+    // Row checkboxes
+    $('tbody').querySelectorAll('tr[data-id]').forEach(function (tr) {
+      tr.querySelector('input').addEventListener('change', function () {
+        this.checked ? selIds.add(tr.dataset.id) : selIds.delete(tr.dataset.id);
+        tr.classList.toggle('sel', this.checked);
+        updateCnt();
+      });
+    });
 
-/* ════════════════════════════════════════════
-APP CONTROLLER
-════════════════════════════════════════════ */
-const App = {
-async init(api) {
-    API.init(api);
-    try {
-    const grps = await API.getGroups();
-    S.groups = grps;
-    S.gMap = {};
-    grps.forEach(g => { S.gMap[g.id] = g; });
-    MS.renderFilterList();
-    Toast.show('Grupos cargados. Presiona "Cargar datos" para continuar.', 'success');
-    } catch(e) {
-    Toast.show('Error cargando grupos: ' + String(e), 'error');
+    updateCnt();
+    $('cTot').textContent = filtered.length;
+  }
+
+  function updateCnt() { $('cSel').textContent = selIds.size; }
+
+  // ─── Confirm ───────────────────────────────────────────────────────────────
+  function confirmOp(op) {
+    if (!selIds.size) { alert('Seleccioná al menos una entidad.'); return; }
+    var grps = Array.from(gs[op === 'add' ? 1 : 2]);
+    if (!grps.length) { alert('Seleccioná al menos un grupo.'); return; }
+    var gnames = grps.map(function (id) { var g = allG.find(function (x) { return x.id === id; }); return g ? g.name : id; }).join(', ');
+    $('confSum').innerHTML = [
+      ['Tipo de entidad', entityType === 'User' ? 'Usuarios' : 'Activos'],
+      ['Entidades seleccionadas', selIds.size],
+      ['Operación', op === 'add' ? 'Agregar grupos' : 'Eliminar grupos'],
+      ['Grupos', gnames]
+    ].map(function (r) { return '<div class="si"><span>' + r[0] + '</span><b>' + esc(String(r[1])) + '</b></div>'; }).join('');
+    pendingOp = { op: op, groups: grps };
+    $('mConf').classList.add('open');
+  }
+
+  // ─── Execute ───────────────────────────────────────────────────────────────
+  function execOp() {
+    $('mConf').classList.remove('open');
+    var op = pendingOp.op, gids = pendingOp.groups;
+    var entities = Array.from(selIds)
+      .map(function (id) { return allE.find(function (e) { return e.id === id; }); })
+      .filter(Boolean);
+    var total = entities.length, done = 0, errs = 0;
+
+    $('progTitle').textContent = op === 'add' ? 'Agregando grupos...' : 'Eliminando grupos...';
+    $('pbar').style.width = '0%';
+    $('progTxt').textContent = '0 / ' + total;
+    $('plog').innerHTML = '';
+    $('btnCP').classList.add('hi');
+    $('mProg').classList.add('open');
+
+    var queue = entities.slice(), active = 0, CONC = 8;
+
+    function next() {
+      while (active < CONC && queue.length) { active++; process(queue.shift()); }
+      if (active === 0) finish();
     }
-},
 
-async setType(type) {
-    if (S.type === type && S.raw.length) return;
-    S.type = type;
-    S.raw = []; S.filtered = []; S.sel.clear(); S.page = 1;
-    document.querySelectorAll('#toggleEl button').forEach(b => b.classList.toggle('on', b.dataset.type === type));
-    updateSelBar();
-    Tbl.render();
-},
-
-async load() {
-    const btn = document.getElementById('loadBtn');
-    btn.disabled = true;
-    S.sel.clear();
-    updateSelBar();
-    document.getElementById('tblContent').innerHTML = '<div class="loading"><div class="spinner"></div>Obteniendo datos de Geotab...</div>';
-    document.getElementById('pgnWrap').classList.add('hidden');
-
-    try {
-    S.raw = await API.getEntities(S.type);
-    Filter.apply();
-    Tbl.render();
-    Toast.show(`${S.raw.length} registros cargados`, 'success');
-    } catch(e) {
-    const msg = String(e||'');
-    const permErr = /[Uu]nauthorized|[Pp]ermission|[Aa]ccess|[Ff]orbidden/.test(msg);
-    Toast.show(permErr ? 'Sin permisos para ver estos datos' : 'Error: ' + msg, 'error');
-    document.getElementById('tblContent').innerHTML = permErr
-        ? `<div class="empty"><div class="empty-ico">🔒</div><h3>Permisos insuficientes</h3><p>Tu cuenta no tiene acceso para ver estos registros.</p></div>`
-        : `<div class="empty"><div class="empty-ico">⚠</div><h3>Error al cargar</h3><p>${esc(msg)}</p></div>`;
-    } finally {
-    btn.disabled = false;
+    function process(e) {
+      var upd = JSON.parse(JSON.stringify(e));
+      if (op === 'add') {
+        var cur = (upd.groups || []).map(function (g) { return g.id; });
+        gids.forEach(function (id) { if (cur.indexOf(id) < 0) upd.groups.push({ id: id }); });
+      } else {
+        upd.groups = (upd.groups || []).filter(function (g) { return gids.indexOf(g.id) < 0; });
+      }
+      api.call('Set', { typeName: entityType, entity: upd }, function () {
+        done++; active--;
+        tick(done + errs, total);
+        next();
+      }, function (err) {
+        errs++; active--;
+        var l = $('plog');
+        l.innerHTML += '<div style="color:#c62828">❌ ' + esc(e.name) + ': ' + esc(String(err)) + '</div>';
+        l.scrollTop = l.scrollHeight;
+        tick(done + errs, total);
+        next();
+      });
     }
-},
 
-filter() { Filter.apply(); Tbl.render(); },
-
-clearFilters() {
-    document.getElementById('fName').value = '';
-    document.getElementById('fStatus').value = '';
-    document.getElementById('fNoGroups').checked = false;
-    MS._filter.clear();
-    MS._updateFilterTags();
-    document.querySelectorAll('#msFilterList input[type=checkbox]').forEach(cb => cb.checked = false);
-    Filter.apply(); Tbl.render();
-},
-
-sort(col) {
-    S.sortDir = S.sortCol === col && S.sortDir === 'asc' ? 'desc' : 'asc';
-    S.sortCol = col;
-    Filter.apply(); Tbl.render();
-},
-
-goPage(p) {
-    if (p < 1 || p > S.totalPages) return;
-    S.page = p; Tbl.render();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-},
-
-selOne(id, checked) {
-    if (checked) S.sel.add(id); else S.sel.delete(id);
-    const row = document.querySelector(`tr[data-id="${id}"]`);
-    if (row) row.classList.toggle('sel', checked);
-    Tbl._pageCheck();
-    updateSelBar();
-},
-
-selPage(checked) {
-    S.paged.forEach(e => checked ? S.sel.add(e.id) : S.sel.delete(e.id));
-    Tbl.render(); updateSelBar();
-},
-
-selAllFiltered(checked) {
-    S.filtered.forEach(e => checked ? S.sel.add(e.id) : S.sel.delete(e.id));
-    Tbl.render(); updateSelBar();
-    document.getElementById('chkAllFiltered').checked = checked;
-},
-
-clearSel() {
-    S.sel.clear();
-    document.getElementById('chkAllFiltered').checked = false;
-    Tbl.render(); updateSelBar();
-}
-};
-
-/* ════════════════════════════════════════════
-GEOTAB ADD-IN REGISTRATION
-════════════════════════════════════════════ */
-(function() {
-    if (typeof geotab !== 'undefined' && geotab.addin) {
-        geotab.addin.groupManager = function(api_, state_) {
-            api = api_;
-            state = state_;
-            return {
-                initialize: function(initApi, initState, callback) {
-                    App.init(initApi || api).finally(() => { if (typeof callback === 'function') callback(); });
-                },
-                focus: function(focusApi) { API.init(focusApi || api); },
-                blur: function() {}
-            };
-        };
-        geotab.addin.exportKML = geotab.addin.groupManager;
-    } else if (typeof api !== 'undefined') {
-        // Standalone / debug mode: api injected globally
-        App.init(api);
-    } else {
-        // No API available: keep the HTML visible for development/debugging
-        console.info('[GroupManager] No Geotab API detected. Abriendo en modo visual estático.');
-        const msg = 'Advertencia: no se detecta la API de Geotab. El add-in solo funcionará dentro de la plataforma Geotab.';
-        if (document.getElementById('toastWrap')) {
-            const div = document.createElement('div');
-            div.className = 'toast toast-warning';
-            div.style.position = 'fixed';
-            div.style.top = '20px';
-            div.style.right = '20px';
-            div.style.zIndex = 2001;
-            div.innerHTML = `<span>⚠</span><span style="margin-left:8px">${msg}</span>`;
-            document.body.appendChild(div);
-        }
+    function tick(n, t) {
+      $('pbar').style.width = Math.round(n / t * 100) + '%';
+      $('progTxt').textContent = n + ' / ' + t;
     }
-})();
 
+    function finish() {
+      $('progTitle').textContent = 'Completado';
+      $('progTxt').textContent = '✅ ' + done + ' OK' + (errs ? ' · ❌ ' + errs + ' errores' : '');
+      $('btnCP').classList.remove('hi');
+      selIds.clear();
+      loadData();
+    }
+
+    next();
+  }
+
+  // ─── Util ──────────────────────────────────────────────────────────────────
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ─── Geotab Add-In entry point ─────────────────────────────────────────────
+  geotab.addin.groupManager = function (api_, state_) {
+    api = api_;
+    return {
+      initialize: function (freshApi, freshState, callback) {
+        api = freshApi;
+        init();
+        callback();
+      },
+      focus: function (freshApi) { api = freshApi; },
+      blur: function () {}
+    };
+  };
+}());
 </script>
 </body>
 </html>
