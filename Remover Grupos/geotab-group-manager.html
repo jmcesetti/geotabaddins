@@ -3,72 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>Gestor de Grupos</title>
-<style>
-#groupManager{padding:16px;max-width:1400px;margin:0 auto;font-family:'Segoe UI',Arial,sans-serif;color:#333;font-size:14px;box-sizing:border-box}
-#groupManager *{box-sizing:border-box}
-#groupManager .card{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.08);padding:18px;margin-bottom:12px}
-#groupManager h1{color:#0076be;font-size:20px;font-weight:600;margin:0}
-#groupManager .sub{color:#666;font-size:12px;margin-top:3px}
-#groupManager .tabs{display:flex;gap:8px;margin-bottom:14px}
-#groupManager .tab{padding:7px 18px;border-radius:8px;border:2px solid #ddd;cursor:pointer;font-size:13px;font-weight:500;background:#fff;transition:.2s}
-#groupManager .tab.active{background:#0076be;color:#fff;border-color:#0076be}
-#groupManager .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
-#groupManager .fg{display:flex;flex-direction:column;gap:4px}
-#groupManager label{font-size:11px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.4px}
-#groupManager input[type=text]{padding:7px 10px;border:1.5px solid #d0d7de;border-radius:7px;font-size:13px;outline:none;width:200px;font-family:inherit}
-#groupManager input[type=text]:focus{border-color:#0076be}
-#groupManager button{padding:7px 14px;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:500;transition:.2s;font-family:inherit}
-#groupManager .bp{background:#0076be;color:#fff}#groupManager .bp:hover{background:#005a9e}
-#groupManager .bs{background:#f0f2f5;color:#333;border:1.5px solid #ddd}#groupManager .bs:hover{background:#e3e5e8}
-#groupManager .bg{background:#28a745;color:#fff}#groupManager .bg:hover{background:#218838}
-#groupManager .br{background:#dc3545;color:#fff}#groupManager .br:hover{background:#c82333}
-#groupManager button:disabled{opacity:.45;cursor:not-allowed}
-#groupManager .ttop{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}
-#groupManager .cnt{font-size:12px;color:#666}
-#groupManager .tw{overflow:auto;max-height:460px;border-radius:8px;border:1px solid #e0e0e0}
-#groupManager table{width:100%;border-collapse:collapse}
-#groupManager thead{position:sticky;top:0;background:#f8f9fa;z-index:1}
-#groupManager th{padding:9px 11px;text-align:left;font-weight:600;font-size:12px;color:#555;border-bottom:2px solid #e0e0e0;cursor:pointer;white-space:nowrap;user-select:none}
-#groupManager th:hover{background:#e9ecef}
-#groupManager th.asc::after{content:' ↑'}#groupManager th.desc::after{content:' ↓'}
-#groupManager td{padding:8px 11px;border-bottom:1px solid #f0f0f0;font-size:13px;max-width:300px}
-#groupManager tr:hover td{background:#f8f9ff}
-#groupManager tr.sel td{background:#e8f0fe}
-#groupManager .tags{display:flex;flex-wrap:wrap;gap:3px}
-#groupManager .tag{background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:10px;font-size:11px;white-space:nowrap}
-#groupManager .abar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid #f0f0f0}
-#groupManager .dvd{width:1px;height:30px;background:#ddd}
-#groupManager .msel{position:relative;min-width:190px}
-#groupManager .mdisp{padding:7px 10px;border:1.5px solid #d0d7de;border-radius:7px;cursor:pointer;font-size:13px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:6px;white-space:nowrap}
-#groupManager .mdisp:hover{border-color:#0076be}
-#groupManager .mdrop{position:absolute;top:calc(100% + 3px);left:0;min-width:220px;background:#fff;border:1.5px solid #d0d7de;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:99;max-height:240px;display:none;flex-direction:column}
-#groupManager .mdrop.open{display:flex}
-#groupManager .msrch{padding:7px;border-bottom:1px solid #eee;flex-shrink:0}
-#groupManager .msrch input{width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:5px;font-size:12px;outline:none}
-#groupManager .mopts{overflow-y:auto}
-#groupManager .mopt{padding:7px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;user-select:none}
-#groupManager .mopt:hover{background:#f0f2f5}
-#groupManager .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center}
-#groupManager .backdrop.open{display:flex}
-#groupManager .modal{background:#fff;border-radius:14px;padding:26px;max-width:480px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,.2)}
-#groupManager .modal h3{font-size:17px;margin-bottom:14px;margin-top:0}
-#groupManager .si{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:13px}
-#groupManager .si:last-child{border:none}
-#groupManager .si b{text-align:right;max-width:65%}
-#groupManager .ma{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
-#groupManager .pbar{background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;margin:10px 0}
-#groupManager .pbar div{background:#0076be;height:100%;transition:width .3s;border-radius:6px}
-#groupManager .pcnt{font-size:12px;text-align:center;color:#666;margin-bottom:4px}
-#groupManager .plog{max-height:120px;overflow-y:auto;font-size:11px;color:#555;margin-top:6px;line-height:1.6}
-#groupManager .sts{padding:9px 13px;border-radius:7px;font-size:12px;margin-top:10px}
-#groupManager .si_{background:#e3f2fd;color:#1565c0}
-#groupManager .ss{background:#e8f5e9;color:#2e7d32}
-#groupManager .se{background:#ffebee;color:#c62828}
-#groupManager .spin{display:inline-block;width:12px;height:12px;border:2px solid #c0d8f0;border-top-color:#0076be;border-radius:50%;animation:gm-sp .7s linear infinite;vertical-align:middle;margin-right:5px}
-@keyframes gm-sp{to{transform:rotate(360deg)}}
-#groupManager .nc{text-align:center;padding:32px;color:#aaa}
-#groupManager .hi{display:none!important}
-</style>
 </head>
 <body>
 <div id="groupManager">
@@ -166,6 +100,80 @@
 </div>
 <script>
 (function () {
+  // Inject styles at runtime so Geotab cannot strip them (it discards <head> content)
+  (function injectStyles() {
+    if (document.getElementById('gm-styles')) return;
+    var s = document.createElement('style');
+    s.id = 'gm-styles';
+    s.textContent = [
+      '#groupManager{padding:16px;max-width:1400px;margin:0 auto;font-family:\'Segoe UI\',Arial,sans-serif;color:#333;font-size:14px;box-sizing:border-box}',
+      '#groupManager *{box-sizing:border-box}',
+      '#groupManager .card{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.08);padding:18px;margin-bottom:12px}',
+      '#groupManager h1{color:#0076be;font-size:20px;font-weight:600;margin:0}',
+      '#groupManager .sub{color:#666;font-size:12px;margin-top:3px}',
+      '#groupManager .tabs{display:flex;gap:8px;margin-bottom:14px}',
+      '#groupManager .tab{padding:7px 18px;border-radius:8px;border:2px solid #ddd;cursor:pointer;font-size:13px;font-weight:500;background:#fff;transition:.2s}',
+      '#groupManager .tab.active{background:#0076be;color:#fff;border-color:#0076be}',
+      '#groupManager .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}',
+      '#groupManager .fg{display:flex;flex-direction:column;gap:4px}',
+      '#groupManager label{font-size:11px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.4px}',
+      '#groupManager input[type=text]{padding:7px 10px;border:1.5px solid #d0d7de;border-radius:7px;font-size:13px;outline:none;width:200px;font-family:inherit}',
+      '#groupManager input[type=text]:focus{border-color:#0076be}',
+      '#groupManager button{padding:7px 14px;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:500;transition:.2s;font-family:inherit}',
+      '#groupManager .bp{background:#0076be;color:#fff}#groupManager .bp:hover{background:#005a9e}',
+      '#groupManager .bs{background:#f0f2f5;color:#333;border:1.5px solid #ddd}#groupManager .bs:hover{background:#e3e5e8}',
+      '#groupManager .bg{background:#28a745;color:#fff}#groupManager .bg:hover{background:#218838}',
+      '#groupManager .br{background:#dc3545;color:#fff}#groupManager .br:hover{background:#c82333}',
+      '#groupManager button:disabled{opacity:.45;cursor:not-allowed}',
+      '#groupManager .ttop{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}',
+      '#groupManager .cnt{font-size:12px;color:#666}',
+      '#groupManager .tw{overflow:auto;max-height:460px;border-radius:8px;border:1px solid #e0e0e0}',
+      '#groupManager table{width:100%;border-collapse:collapse}',
+      '#groupManager thead{position:sticky;top:0;background:#f8f9fa;z-index:1}',
+      '#groupManager th{padding:9px 11px;text-align:left;font-weight:600;font-size:12px;color:#555;border-bottom:2px solid #e0e0e0;cursor:pointer;white-space:nowrap;user-select:none}',
+      '#groupManager th:hover{background:#e9ecef}',
+      '#groupManager th.asc::after{content:" ↑"}#groupManager th.desc::after{content:" ↓"}',
+      '#groupManager td{padding:8px 11px;border-bottom:1px solid #f0f0f0;font-size:13px;max-width:300px}',
+      '#groupManager tr:hover td{background:#f8f9ff}',
+      '#groupManager tr.sel td{background:#e8f0fe}',
+      '#groupManager .tags{display:flex;flex-wrap:wrap;gap:3px}',
+      '#groupManager .tag{background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:10px;font-size:11px;white-space:nowrap}',
+      '#groupManager .abar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid #f0f0f0}',
+      '#groupManager .dvd{width:1px;height:30px;background:#ddd}',
+      '#groupManager .msel{position:relative;min-width:190px}',
+      '#groupManager .mdisp{padding:7px 10px;border:1.5px solid #d0d7de;border-radius:7px;cursor:pointer;font-size:13px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:6px;white-space:nowrap}',
+      '#groupManager .mdisp:hover{border-color:#0076be}',
+      '#groupManager .mdrop{position:absolute;top:calc(100% + 3px);left:0;min-width:220px;background:#fff;border:1.5px solid #d0d7de;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:99;max-height:240px;display:none;flex-direction:column}',
+      '#groupManager .mdrop.open{display:flex}',
+      '#groupManager .msrch{padding:7px;border-bottom:1px solid #eee;flex-shrink:0}',
+      '#groupManager .msrch input{width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:5px;font-size:12px;outline:none}',
+      '#groupManager .mopts{overflow-y:auto}',
+      '#groupManager .mopt{padding:7px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;user-select:none}',
+      '#groupManager .mopt:hover{background:#f0f2f5}',
+      '#groupManager .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center}',
+      '#groupManager .backdrop.open{display:flex}',
+      '#groupManager .modal{background:#fff;border-radius:14px;padding:26px;max-width:480px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,.2)}',
+      '#groupManager .modal h3{font-size:17px;margin-bottom:14px;margin-top:0}',
+      '#groupManager .si{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:13px}',
+      '#groupManager .si:last-child{border:none}',
+      '#groupManager .si b{text-align:right;max-width:65%}',
+      '#groupManager .ma{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}',
+      '#groupManager .pbar{background:#e0e0e0;border-radius:6px;height:10px;overflow:hidden;margin:10px 0}',
+      '#groupManager .pbar div{background:#0076be;height:100%;transition:width .3s;border-radius:6px}',
+      '#groupManager .pcnt{font-size:12px;text-align:center;color:#666;margin-bottom:4px}',
+      '#groupManager .plog{max-height:120px;overflow-y:auto;font-size:11px;color:#555;margin-top:6px;line-height:1.6}',
+      '#groupManager .sts{padding:9px 13px;border-radius:7px;font-size:12px;margin-top:10px}',
+      '#groupManager .si_{background:#e3f2fd;color:#1565c0}',
+      '#groupManager .ss{background:#e8f5e9;color:#2e7d32}',
+      '#groupManager .se{background:#ffebee;color:#c62828}',
+      '#groupManager .spin{display:inline-block;width:12px;height:12px;border:2px solid #c0d8f0;border-top-color:#0076be;border-radius:50%;animation:gm-sp .7s linear infinite;vertical-align:middle;margin-right:5px}',
+      '@keyframes gm-sp{to{transform:rotate(360deg)}}',
+      '#groupManager .nc{text-align:center;padding:32px;color:#aaa}',
+      '#groupManager .hi{display:none!important}'
+    ].join('');
+    document.head.appendChild(s);
+  }());
+
   var api, entityType = 'User';
   var allE = [], allG = [], filtered = [], selIds = new Set();
   var gs = [new Set(), new Set(), new Set()]; // [filterGroups, addGroups, removeGroups]
