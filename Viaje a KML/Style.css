@@ -1,7 +1,7 @@
 /* --- Aislamiento total para el add-in Exportar KML --- */
 
 #exportKML {
-  all: initial; /* Reinicia TODO el CSS heredado de Geotab */
+  all: initial; /*Reinicia TODO el CSS heredado de Geotab */
   font-family: "Segoe UI", Roboto, Arial, sans-serif;
   background: #f3f6fa;
   color: #333;
