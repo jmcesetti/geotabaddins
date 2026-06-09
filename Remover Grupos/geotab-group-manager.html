@@ -480,15 +480,21 @@
       } else {
         updatedGroups = currentGroups.filter(function (g) { return gids.indexOf(g.id) < 0; });
       }
+      var fellbackToCompany = false;
       if (!updatedGroups.length) {
         updatedGroups = [{ id: 'GroupCompanyId' }];
+        fellbackToCompany = true;
       }
       var upd = { id: e.id };
       upd[gk] = updatedGroups;
       if (entityType === 'User') {
-        var agf = { groupFilterCondition: { relation: 'Or', groupFilterConditions: updatedGroups.map(function (g) { return { groupId: g.id }; }) } };
-        if (e.accessGroupFilter && e.accessGroupFilter.id) agf.id = e.accessGroupFilter.id;
-        upd.accessGroupFilter = agf;
+        if (fellbackToCompany) {
+          upd.accessGroupFilter = null;
+        } else {
+          var agf = { groupFilterCondition: { relation: 'Or', groupFilterConditions: updatedGroups.map(function (g) { return { groupId: g.id }; }) } };
+          if (e.accessGroupFilter && e.accessGroupFilter.id) agf.id = e.accessGroupFilter.id;
+          upd.accessGroupFilter = agf;
+        }
       }
       api.call('Set', { typeName: entityType, entity: upd }, function () {
         done++; active--;
