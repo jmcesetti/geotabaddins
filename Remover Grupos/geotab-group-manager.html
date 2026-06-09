@@ -363,8 +363,8 @@
   }
 
   var colDefs = {
-    User: [['name', 'Nombre'], ['userName', 'Usuario'], ['groups', 'Grupos']],
-    Device: [['name', 'Nombre'], ['serialNumber', 'N/S'], ['groups', 'Grupos']]
+    User: [['fullName', 'Nombre'], ['userName', 'Usuario'], ['groups', 'Grupos']],
+    Device: [['name', 'Nombre'], ['licensePlate', 'Patente'], ['groups', 'Grupos']]
   };
 
   function renderTable() {
@@ -394,6 +394,8 @@
           + '<td><input type="checkbox"' + (selIds.has(e.id) ? ' checked' : '') + '></td>'
           + cols.map(function (c) {
             if (c[0] === 'groups') return '<td><div class="tags">' + (tags || '<span style="color:#ccc">—</span>') + '</div></td>';
+            if (c[0] === 'fullName') return '<td>' + esc(((e.firstName || '') + ' ' + (e.lastName || '')).trim()) + '</td>';
+            if (c[0] === 'licensePlate') return '<td>' + esc((e.licensePlate) || '—') + '</td>';
             return '<td>' + esc(e[c[0]] || '') + '</td>';
           }).join('') + '</tr>';
       }).join('');
