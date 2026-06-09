@@ -182,13 +182,26 @@
   }());
 
   var api, entityType = 'User';
-  var allE = [], allG = [], childrenMap = {}, groupNameMap = {}, filtered = [], selIds = new Set();
+  var allE = [], allG = [], childrenMap = {}, parentMap = {}, groupNameMap = {}, filtered = [], selIds = new Set();
   var gs = [new Set(), new Set(), new Set()]; // [filterGroups, addGroups, removeGroups]
   var sortC = 'name', sortD = 1, pendingOp = null;
   var $ = function (id) { return document.getElementById(id); };
   // User entities use 'companyGroups'; Device entities use 'groups'
   function grpKey() { return entityType === 'User' ? 'companyGroups' : 'groups'; }
   function grpsOf(e) { return e[grpKey()] || []; }
+
+  // Returns all ancestor and descendant IDs of a given group ID
+  function relatedIds(id) {
+    var related = new Set();
+    var stack;
+    // ancestors
+    stack = [id];
+    while (stack.length) { var p = parentMap[stack.pop()]; if (p && !related.has(p)) { related.add(p); stack.push(p); } }
+    // descendants
+    stack = [id];
+    while (stack.length) { (childrenMap[stack.pop()] || []).forEach(function (c) { if (!related.has(c)) { related.add(c); stack.push(c); } }); }
+    return related;
+  }
 
   // ─── MultiSelect ───────────────────────────────────────────────────────────
   function MS(idx, placeholder, onChange) {
@@ -304,10 +317,12 @@
     api.call('Get', { typeName: 'Group' }, function (groups) {
       // Build children map from ALL groups for hierarchical filtering
       childrenMap = {};
+      parentMap = {};
       groupNameMap = {};
       groups.forEach(function (g) {
         childrenMap[g.id] = (g.children || []).map(function (c) { return c.id; });
         groupNameMap[g.id] = g.name || g.id;
+        (g.children || []).forEach(function (c) { parentMap[c.id] = g.id; });
       });
 
       // Only show user-created (custom) groups; system groups have descriptive IDs, custom ones are base-36 starting with 'b'
@@ -476,9 +491,12 @@
       var currentGroups = (e[gk] || []).slice();
       var updatedGroups;
       if (op === 'add') {
-        var cur = currentGroups.map(function (g) { return g.id; });
-        updatedGroups = currentGroups.slice();
-        gids.forEach(function (id) { if (cur.indexOf(id) < 0) updatedGroups.push({ id: id }); });
+        // Build set of all ancestors/descendants of the new groups
+        var conflicting = new Set();
+        gids.forEach(function (id) { relatedIds(id).forEach(function (r) { conflicting.add(r); }); });
+        // Keep existing groups that don't conflict with any new group, then append new groups
+        updatedGroups = currentGroups.filter(function (g) { return !conflicting.has(g.id) && gids.indexOf(g.id) < 0; });
+        gids.forEach(function (id) { updatedGroups.push({ id: id }); });
       } else {
         updatedGroups = currentGroups.filter(function (g) { return gids.indexOf(g.id) < 0; });
       }
@@ -525,7 +543,6 @@
       $('progTitle').textContent = 'Completado';
       $('progTxt').textContent = '✅ ' + done + ' OK' + (errs ? ' · ❌ ' + errs + ' errores' : '');
       $('btnCP').classList.remove('hi');
-      selIds.clear();
       if (ms[1]) ms[1].clear();
       if (ms[2]) ms[2].clear();
       loadData();
