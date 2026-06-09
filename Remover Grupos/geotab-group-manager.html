@@ -486,7 +486,12 @@
       var upd = { id: e.id };
       upd[gk] = updatedGroups;
       if (entityType === 'User') {
-        upd.accessGroupFilter = null;
+        upd.accessGroupFilter = {
+          groupFilterCondition: {
+            relation: 'Or',
+            groupFilterConditions: updatedGroups.map(function (g) { return { groupId: g.id }; })
+          }
+        };
       }
       api.call('Set', { typeName: entityType, entity: upd }, function () {
         done++; active--;
