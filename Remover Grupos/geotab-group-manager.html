@@ -481,12 +481,12 @@
         updatedGroups = currentGroups.filter(function (g) { return gids.indexOf(g.id) < 0; });
       }
       if (!updatedGroups.length) {
-        updatedGroups = [{ id: 'b2720' }];
+        updatedGroups = [{ id: 'GroupCompanyId' }];
       }
       var upd = { id: e.id };
       upd[gk] = updatedGroups;
       if (entityType === 'User') {
-        if (updatedGroups.length === 1 && updatedGroups[0].id === 'b2720') {
+        if (updatedGroups.length === 1 && updatedGroups[0].id === 'GroupCompanyId') {
           upd.accessGroupFilter = null;
         } else {
           var conditions = updatedGroups.map(function (g) { return { groupId: g.id }; });
