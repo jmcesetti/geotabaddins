@@ -482,6 +482,9 @@
       }
       var upd = { id: e.id };
       upd[gk] = updatedGroups;
+      if (entityType === 'User') {
+        upd.accessGroupFilter = null;
+      }
       api.call('Set', { typeName: entityType, entity: upd }, function () {
         done++; active--;
         tick(done + errs, total);
