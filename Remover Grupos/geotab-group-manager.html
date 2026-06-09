@@ -486,12 +486,9 @@
       var upd = { id: e.id };
       upd[gk] = updatedGroups;
       if (entityType === 'User') {
-        upd.accessGroupFilter = {
-          groupFilterCondition: {
-            relation: 'Or',
-            groupFilterConditions: updatedGroups.map(function (g) { return { groupId: g.id }; })
-          }
-        };
+        var agf = { groupFilterCondition: { relation: 'Or', groupFilterConditions: updatedGroups.map(function (g) { return { groupId: g.id }; }) } };
+        if (e.accessGroupFilter && e.accessGroupFilter.id) agf.id = e.accessGroupFilter.id;
+        upd.accessGroupFilter = agf;
       }
       api.call('Set', { typeName: entityType, entity: upd }, function () {
         done++; active--;
