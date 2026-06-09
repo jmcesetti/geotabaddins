@@ -470,14 +470,21 @@
     }
 
     function process(e) {
-      var upd = JSON.parse(JSON.stringify(e));
       var gk = grpKey();
+      var currentGroups = (e[gk] || []).slice();
+      var updatedGroups;
       if (op === 'add') {
-        upd[gk] = upd[gk] || [];
-        var cur = upd[gk].map(function (g) { return g.id; });
-        gids.forEach(function (id) { if (cur.indexOf(id) < 0) upd[gk].push({ id: id }); });
+        var cur = currentGroups.map(function (g) { return g.id; });
+        updatedGroups = currentGroups.slice();
+        gids.forEach(function (id) { if (cur.indexOf(id) < 0) updatedGroups.push({ id: id }); });
       } else {
-        upd[gk] = (upd[gk] || []).filter(function (g) { return gids.indexOf(g.id) < 0; });
+        updatedGroups = currentGroups.filter(function (g) { return gids.indexOf(g.id) < 0; });
+      }
+      var upd = { id: e.id };
+      upd[gk] = updatedGroups;
+      // For users, keep data access (privateUserGroups) in sync with companyGroups
+      if (entityType === 'User') {
+        upd.privateUserGroups = updatedGroups.slice();
       }
       api.call('Set', { typeName: entityType, entity: upd }, function () {
         done++; active--;
