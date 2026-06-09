@@ -316,6 +316,7 @@
 
       api.call('Get', { typeName: entityType, resultsLimit: 50000 }, function (entities) {
         allE = entities;
+        if (entities.length) console.log('[GM] groups de primer entidad:', JSON.stringify(entities[0].groups), '| keys:', Object.keys(entities[0]).join(', '));
         $('btnLoad').disabled = false;
         setStatus('ss', '✅ ' + entities.length + ' ' + (entityType === 'User' ? 'usuarios' : 'activos') + ' · ' + allG.length + ' grupos disponibles');
         applyFilter();
