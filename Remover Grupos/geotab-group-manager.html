@@ -304,7 +304,7 @@
       groupNameMap = {};
       groups.forEach(function (g) {
         childrenMap[g.id] = (g.children || []).map(function (c) { return c.id; });
-        if (g.name) groupNameMap[g.id] = g.name;
+        groupNameMap[g.id] = g.name || g.id;
       });
 
       // Only show user-created (custom) groups; system groups have descriptive IDs, custom ones are base-36 starting with 'b'
@@ -385,7 +385,7 @@
     } else {
       $('tbody').innerHTML = sorted.map(function (e) {
         var tags = (e.groups || []).map(function (g) {
-          return groupNameMap[g.id] ? '<span class="tag">' + esc(groupNameMap[g.id]) + '</span>' : '';
+          return '<span class="tag">' + esc(groupNameMap[g.id] || g.id) + '</span>';
         }).join('');
         return '<tr class="' + (selIds.has(e.id) ? 'sel' : '') + '" data-id="' + e.id + '">'
           + '<td><input type="checkbox"' + (selIds.has(e.id) ? ' checked' : '') + '></td>'
