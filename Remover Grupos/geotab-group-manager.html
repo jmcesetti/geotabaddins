@@ -182,7 +182,7 @@
   }());
 
   var api, entityType = 'User';
-  var allE = [], allG = [], childrenMap = {}, filtered = [], selIds = new Set();
+  var allE = [], allG = [], childrenMap = {}, groupNameMap = {}, filtered = [], selIds = new Set();
   var gs = [new Set(), new Set(), new Set()]; // [filterGroups, addGroups, removeGroups]
   var sortC = 'name', sortD = 1, pendingOp = null;
   var $ = function (id) { return document.getElementById(id); };
@@ -193,6 +193,22 @@
     var disp = $('md' + idx), lbl = $('ml' + idx), drop = $('mdd' + idx);
     var srch = $('ms' + idx + 's'), opts = $('ms' + idx + 'o');
     var items = [];
+
+    // Deselect-all button
+    var dsBtnRow = document.createElement('div');
+    dsBtnRow.style.cssText = 'padding:4px 7px;border-bottom:1px solid #eee;flex-shrink:0';
+    var dsBtn = document.createElement('button');
+    dsBtn.className = 'bs';
+    dsBtn.textContent = 'Deseleccionar todos';
+    dsBtn.style.cssText = 'font-size:11px;padding:2px 8px;width:100%';
+    dsBtn.addEventListener('click', function () {
+      sel.clear();
+      lbl.textContent = placeholder;
+      render();
+      if (onChange) onChange();
+    });
+    dsBtnRow.appendChild(dsBtn);
+    opts.parentNode.insertBefore(dsBtnRow, opts);
 
     disp.addEventListener('click', function (e) { e.stopPropagation(); toggle(); });
     srch.addEventListener('input', render);
@@ -209,14 +225,25 @@
           return '<div class="mopt" data-id="' + g.id + '"><input type="checkbox"' + (sel.has(g.id) ? ' checked' : '') + '>' + esc(g.name) + '</div>';
         }).join('');
       opts.querySelectorAll('.mopt').forEach(function (d) {
+        var chk = d.querySelector('input');
+        var id = d.dataset.id;
+        // Clicking the text area: manually toggle the checkbox
         d.addEventListener('click', function (e) {
-          e.preventDefault();
-          var id = this.dataset.id, chk = this.querySelector('input');
-          sel.has(id) ? (sel.delete(id), chk.checked = false) : (sel.add(id), chk.checked = true);
-          lbl.textContent = sel.size ? sel.size + ' grupo(s)' : placeholder;
-          if (onChange) onChange();
+          if (e.target === chk) return;
+          chk.checked = !chk.checked;
+          updateSel(id, chk.checked);
+        });
+        // Clicking the checkbox directly: read state after browser commits the toggle
+        chk.addEventListener('change', function () {
+          updateSel(id, this.checked);
         });
       });
+    }
+
+    function updateSel(id, checked) {
+      checked ? sel.add(id) : sel.delete(id);
+      lbl.textContent = sel.size ? sel.size + ' grupo(s)' : placeholder;
+      if (onChange) onChange();
     }
 
     return {
@@ -274,8 +301,10 @@
     api.call('Get', { typeName: 'Group' }, function (groups) {
       // Build children map from ALL groups for hierarchical filtering
       childrenMap = {};
+      groupNameMap = {};
       groups.forEach(function (g) {
         childrenMap[g.id] = (g.children || []).map(function (c) { return c.id; });
+        if (g.name) groupNameMap[g.id] = g.name;
       });
 
       // Only show user-created (custom) groups; system groups have descriptive IDs, custom ones are base-36 starting with 'b'
@@ -343,9 +372,6 @@
       return va < vb ? -sortD : va > vb ? sortD : 0;
     });
 
-    var gMap = {};
-    allG.forEach(function (g) { gMap[g.id] = g.name; });
-
     // Header
     $('thead').innerHTML = '<tr><th><input type="checkbox" id="chkA"></th>'
       + cols.map(function (c) {
@@ -359,7 +385,7 @@
     } else {
       $('tbody').innerHTML = sorted.map(function (e) {
         var tags = (e.groups || []).map(function (g) {
-          return gMap[g.id] ? '<span class="tag">' + esc(gMap[g.id]) + '</span>' : '';
+          return groupNameMap[g.id] ? '<span class="tag">' + esc(groupNameMap[g.id]) + '</span>' : '';
         }).join('');
         return '<tr class="' + (selIds.has(e.id) ? 'sel' : '') + '" data-id="' + e.id + '">'
           + '<td><input type="checkbox"' + (selIds.has(e.id) ? ' checked' : '') + '></td>'
@@ -473,6 +499,8 @@
       $('progTxt').textContent = '✅ ' + done + ' OK' + (errs ? ' · ❌ ' + errs + ' errores' : '');
       $('btnCP').classList.remove('hi');
       selIds.clear();
+      if (ms[1]) ms[1].clear();
+      if (ms[2]) ms[2].clear();
       loadData();
     }
 
