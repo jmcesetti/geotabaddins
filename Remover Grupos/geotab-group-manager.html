@@ -98,6 +98,13 @@
   </div>
 
 </div>
+
+<div id="gm-access-denied" style="display:none;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center;font-family:'Segoe UI',Arial,sans-serif;gap:12px">
+  <div style="font-size:48px">&#128274;</div>
+  <h2 style="color:#c62828;margin:0;font-size:20px">Acceso no autorizado</h2>
+  <p style="color:#666;margin:0;font-size:14px">No ten&#233;s permisos para acceder a esta herramienta.</p>
+</div>
+
 <script>
 (function () {
   // Inject styles at runtime so Geotab cannot strip them (it discards <head> content)
@@ -175,7 +182,7 @@
   }());
 
   var api, entityType = 'User';
-  var allE = [], allG = [], filtered = [], selIds = new Set();
+  var allE = [], allG = [], childrenMap = {}, filtered = [], selIds = new Set();
   var gs = [new Set(), new Set(), new Set()]; // [filterGroups, addGroups, removeGroups]
   var sortC = 'name', sortD = 1, pendingOp = null;
   var $ = function (id) { return document.getElementById(id); };
@@ -265,8 +272,15 @@
     $('btnLoad').disabled = true;
 
     api.call('Get', { typeName: 'Group' }, function (groups) {
+      // Build children map from ALL groups for hierarchical filtering
+      childrenMap = {};
+      groups.forEach(function (g) {
+        childrenMap[g.id] = (g.children || []).map(function (c) { return c.id; });
+      });
+
+      // Only show user-created (custom) groups; system groups have descriptive IDs, custom ones are base-36 starting with 'b'
       allG = groups
-        .filter(function (g) { return g.name; })
+        .filter(function (g) { return g.name && /^b[0-9a-zA-Z]+$/.test(g.id); })
         .sort(function (a, b) { return a.name.localeCompare(b.name); });
 
       ms.forEach(function (m) { if (m) m.setItems(allG); });
@@ -291,11 +305,25 @@
   function applyFilter() {
     var q = $('fName').value.toLowerCase();
     var gf = Array.from(gs[0]);
+
+    // Expand selected groups to include all descendants (hierarchical match)
+    var expandedIds = new Set();
+    if (gf.length) {
+      var stack = gf.slice();
+      while (stack.length) {
+        var cur = stack.pop();
+        if (!expandedIds.has(cur)) {
+          expandedIds.add(cur);
+          (childrenMap[cur] || []).forEach(function (kid) { stack.push(kid); });
+        }
+      }
+    }
+
     filtered = allE.filter(function (e) {
       if (q && !(e.name || '').toLowerCase().includes(q)) return false;
-      if (gf.length) {
-        var eg = (e.groups || []).map(function (g) { return g.id; });
-        if (!gf.some(function (id) { return eg.indexOf(id) > -1; })) return false;
+      if (expandedIds.size) {
+        var eg = (e.groups || []).map(function (g) { return String(g.id); });
+        if (!eg.some(function (id) { return expandedIds.has(id); })) return false;
       }
       return true;
     });
@@ -415,7 +443,8 @@
     function process(e) {
       var upd = JSON.parse(JSON.stringify(e));
       if (op === 'add') {
-        var cur = (upd.groups || []).map(function (g) { return g.id; });
+        upd.groups = upd.groups || [];  // ensure array exists before pushing
+        var cur = upd.groups.map(function (g) { return g.id; });
         gids.forEach(function (id) { if (cur.indexOf(id) < 0) upd.groups.push({ id: id }); });
       } else {
         upd.groups = (upd.groups || []).filter(function (g) { return gids.indexOf(g.id) < 0; });
@@ -461,8 +490,32 @@
     return {
       initialize: function (freshApi, freshState, callback) {
         api = freshApi;
-        init();
-        callback();
+
+        api.getSession(function (session) {
+          const gmUsuarioActual = (session.userName || '').toLowerCase().trim();
+
+          const gmListaBlanca = [
+            'fsoto@tsbsa.com.ar',
+            'jm@cesetti.com.ar',
+            'mt@cesetti.com.ar',
+            'df@cesetti.com.ar'
+          ];
+
+          const gmAutorizado = gmListaBlanca.includes(gmUsuarioActual);
+          const gmContenido = document.getElementById('groupManager');
+          const gmDenegado = document.getElementById('gm-access-denied');
+
+          if (gmAutorizado) {
+            gmContenido.style.display = '';
+            gmDenegado.style.display = 'none';
+            init();
+          } else {
+            gmContenido.style.display = 'none';
+            gmDenegado.style.display = 'flex';
+          }
+
+          callback();
+        });
       },
       focus: function (freshApi) { api = freshApi; },
       blur: function () {}
