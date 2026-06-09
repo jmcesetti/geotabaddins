@@ -482,10 +482,6 @@
       }
       var upd = { id: e.id };
       upd[gk] = updatedGroups;
-      // For users, keep data access filter in sync with companyGroups
-      if (entityType === 'User') {
-        upd.accessGroupFilter = updatedGroups.slice();
-      }
       api.call('Set', { typeName: entityType, entity: upd }, function () {
         done++; active--;
         tick(done + errs, total);
