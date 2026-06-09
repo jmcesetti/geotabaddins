@@ -491,7 +491,11 @@
         if (fellbackToCompany) {
           upd.accessGroupFilter = null;
         } else {
-          var agf = { groupFilterCondition: { relation: 'Or', groupFilterConditions: updatedGroups.map(function (g) { return { groupId: g.id }; }) } };
+          var conditions = updatedGroups.map(function (g) { return { groupId: g.id }; });
+          var rootCondition = conditions.length === 1
+            ? conditions[0]
+            : { relation: 'Or', groupFilterConditions: conditions };
+          var agf = { groupFilterCondition: rootCondition };
           if (e.accessGroupFilter && e.accessGroupFilter.id) agf.id = e.accessGroupFilter.id;
           upd.accessGroupFilter = agf;
         }
