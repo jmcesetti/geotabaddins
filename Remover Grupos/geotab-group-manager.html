@@ -186,6 +186,9 @@
   var gs = [new Set(), new Set(), new Set()]; // [filterGroups, addGroups, removeGroups]
   var sortC = 'name', sortD = 1, pendingOp = null;
   var $ = function (id) { return document.getElementById(id); };
+  // User entities use 'companyGroups'; Device entities use 'groups'
+  function grpKey() { return entityType === 'User' ? 'companyGroups' : 'groups'; }
+  function grpsOf(e) { return e[grpKey()] || []; }
 
   // ─── MultiSelect ───────────────────────────────────────────────────────────
   function MS(idx, placeholder, onChange) {
@@ -316,7 +319,6 @@
 
       api.call('Get', { typeName: entityType, resultsLimit: 50000 }, function (entities) {
         allE = entities;
-        if (entities.length) console.log('[GM] groups de primer entidad:', JSON.stringify(entities[0].groups), '| keys:', Object.keys(entities[0]).join(', '));
         $('btnLoad').disabled = false;
         setStatus('ss', '✅ ' + entities.length + ' ' + (entityType === 'User' ? 'usuarios' : 'activos') + ' · ' + allG.length + ' grupos disponibles');
         applyFilter();
@@ -352,7 +354,7 @@
     filtered = allE.filter(function (e) {
       if (q && !(e.name || '').toLowerCase().includes(q)) return false;
       if (expandedIds.size) {
-        var eg = (e.groups || []).map(function (g) { return String(g.id); });
+        var eg = grpsOf(e).map(function (g) { return String(g.id); });
         if (!eg.some(function (id) { return expandedIds.has(id); })) return false;
       }
       return true;
@@ -385,7 +387,7 @@
       $('tbody').innerHTML = '<tr><td colspan="' + (cols.length + 1) + '" class="nc">Sin resultados para los filtros aplicados</td></tr>';
     } else {
       $('tbody').innerHTML = sorted.map(function (e) {
-        var tags = (e.groups || []).map(function (g) {
+        var tags = grpsOf(e).map(function (g) {
           return '<span class="tag">' + esc(groupNameMap[g.id] || g.id) + '</span>';
         }).join('');
         return '<tr class="' + (selIds.has(e.id) ? 'sel' : '') + '" data-id="' + e.id + '">'
@@ -469,12 +471,13 @@
 
     function process(e) {
       var upd = JSON.parse(JSON.stringify(e));
+      var gk = grpKey();
       if (op === 'add') {
-        upd.groups = upd.groups || [];  // ensure array exists before pushing
-        var cur = upd.groups.map(function (g) { return g.id; });
-        gids.forEach(function (id) { if (cur.indexOf(id) < 0) upd.groups.push({ id: id }); });
+        upd[gk] = upd[gk] || [];
+        var cur = upd[gk].map(function (g) { return g.id; });
+        gids.forEach(function (id) { if (cur.indexOf(id) < 0) upd[gk].push({ id: id }); });
       } else {
-        upd.groups = (upd.groups || []).filter(function (g) { return gids.indexOf(g.id) < 0; });
+        upd[gk] = (upd[gk] || []).filter(function (g) { return gids.indexOf(g.id) < 0; });
       }
       api.call('Set', { typeName: entityType, entity: upd }, function () {
         done++; active--;
