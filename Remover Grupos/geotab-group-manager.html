@@ -480,15 +480,10 @@
       } else {
         updatedGroups = currentGroups.filter(function (g) { return gids.indexOf(g.id) < 0; });
       }
-      var fellbackToCompany = false;
-      if (!updatedGroups.length) {
-        updatedGroups = [{ id: 'GroupCompanyId' }];
-        fellbackToCompany = true;
-      }
       var upd = { id: e.id };
       upd[gk] = updatedGroups;
       if (entityType === 'User') {
-        if (fellbackToCompany) {
+        if (!updatedGroups.length) {
           upd.accessGroupFilter = null;
         } else {
           var conditions = updatedGroups.map(function (g) { return { groupId: g.id }; });
