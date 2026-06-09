@@ -60,6 +60,7 @@
         </div>
         <button class="bg" id="btnAdd">Agregar grupos</button>
       </div>
+      <div class="grp-conflict-msg" id="grpConflictMsg">⚠ No se pueden agregar grupos padre/hijo entre sí</div>
       <div class="dvd"></div>
       <div class="row" style="gap:8px;align-items:center">
         <div class="msel">
@@ -157,6 +158,11 @@
       '#groupManager .mopts{overflow-y:auto}',
       '#groupManager .mopt{padding:7px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:8px;user-select:none}',
       '#groupManager .mopt:hover{background:#f0f2f5}',
+      '#groupManager .mopt.conflict{background:#fff3f3;color:#c62828}',
+      '#groupManager .mopt.conflict input{accent-color:#c62828}',
+      '#groupManager .mdisp.conflict{border-color:#c62828!important;background:#fff8f8}',
+      '#groupManager .grp-conflict-msg{color:#c62828;font-size:11px;margin-top:4px;display:none}',
+      '#groupManager .grp-conflict-msg.visible{display:block}',
       '#groupManager .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:none;align-items:center;justify-content:center}',
       '#groupManager .backdrop.open{display:flex}',
       '#groupManager .modal{background:#fff;border-radius:14px;padding:26px;max-width:480px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,.2)}',
@@ -204,7 +210,7 @@
   }
 
   // ─── MultiSelect ───────────────────────────────────────────────────────────
-  function MS(idx, placeholder, onChange) {
+  function MS(idx, placeholder, onChange, onValidate) {
     var sel = gs[idx];
     var disp = $('md' + idx), lbl = $('ml' + idx), drop = $('mdd' + idx);
     var srch = $('ms' + idx + 's'), opts = $('ms' + idx + 'o');
@@ -222,6 +228,7 @@
       lbl.textContent = placeholder;
       render();
       if (onChange) onChange();
+      if (onValidate) onValidate();
     });
     dsBtnRow.appendChild(dsBtn);
     opts.parentNode.insertBefore(dsBtnRow, opts);
@@ -234,11 +241,13 @@
     function toggle() { drop.classList.toggle('open'); if (drop.classList.contains('open')) { srch.focus(); render(); } }
 
     function render() {
+      var conflictIds = onValidate ? onValidate() : new Set();
       var q = srch.value.toLowerCase();
       opts.innerHTML = items
         .filter(function (g) { return g.name.toLowerCase().includes(q); })
         .map(function (g) {
-          return '<div class="mopt" data-id="' + g.id + '"><input type="checkbox"' + (sel.has(g.id) ? ' checked' : '') + '>' + esc(g.name) + '</div>';
+          var isConflict = conflictIds && conflictIds.has(g.id);
+          return '<div class="mopt' + (isConflict ? ' conflict' : '') + '" data-id="' + g.id + '"><input type="checkbox"' + (sel.has(g.id) ? ' checked' : '') + '>' + esc(g.name) + '</div>';
         }).join('');
       opts.querySelectorAll('.mopt').forEach(function (d) {
         var chk = d.querySelector('input');
@@ -259,12 +268,15 @@
     function updateSel(id, checked) {
       checked ? sel.add(id) : sel.delete(id);
       lbl.textContent = sel.size ? sel.size + ' grupo(s)' : placeholder;
+      if (onValidate) onValidate();
+      render();
       if (onChange) onChange();
     }
 
     return {
       setItems: function (arr) { items = arr; render(); },
-      clear: function () { sel.clear(); lbl.textContent = placeholder; render(); }
+      clear: function () { sel.clear(); lbl.textContent = placeholder; render(); },
+      refresh: function () { render(); }
     };
   }
 
@@ -273,7 +285,7 @@
   // ─── Init ──────────────────────────────────────────────────────────────────
   function init() {
     ms[0] = MS(0, 'Todos los grupos', applyFilter);
-    ms[1] = MS(1, 'Grupos a agregar');
+    ms[1] = MS(1, 'Grupos a agregar', null, validateAddGroups);
     ms[2] = MS(2, 'Grupos a eliminar');
 
     document.querySelectorAll('.tab').forEach(function (t) {
@@ -447,11 +459,38 @@
 
   function updateCnt() { $('cSel').textContent = selIds.size; }
 
+  // Returns Set of group IDs that conflict (are ancestor/descendant of another selected add-group)
+  // Also updates visual state of the selector and the error message.
+  function validateAddGroups() {
+    var selected = Array.from(gs[1]);
+    var conflictIds = new Set();
+    selected.forEach(function (id) {
+      var rel = relatedIds(id);
+      selected.forEach(function (other) {
+        if (other !== id && rel.has(other)) {
+          conflictIds.add(id);
+          conflictIds.add(other);
+        }
+      });
+    });
+    var disp = $('md1');
+    var msg = $('grpConflictMsg');
+    if (conflictIds.size) {
+      disp.classList.add('conflict');
+      msg.classList.add('visible');
+    } else {
+      disp.classList.remove('conflict');
+      msg.classList.remove('visible');
+    }
+    return conflictIds;
+  }
+
   // ─── Confirm ───────────────────────────────────────────────────────────────
   function confirmOp(op) {
     if (!selIds.size) { alert('Seleccioná al menos una entidad.'); return; }
     var grps = Array.from(gs[op === 'add' ? 1 : 2]);
     if (!grps.length) { alert('Seleccioná al menos un grupo.'); return; }
+    if (op === 'add' && validateAddGroups().size) { alert('Hay grupos padre/hijo seleccionados. Corregí la selección antes de continuar.'); return; }
     var gnames = grps.map(function (id) { var g = allG.find(function (x) { return x.id === id; }); return g ? g.name : id; }).join(', ');
     $('confSum').innerHTML = [
       ['Tipo de entidad', entityType === 'User' ? 'Usuarios' : 'Activos'],
