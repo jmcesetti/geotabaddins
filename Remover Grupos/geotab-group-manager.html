@@ -481,22 +481,24 @@
         updatedGroups = currentGroups.filter(function (g) { return gids.indexOf(g.id) < 0; });
       }
       if (!updatedGroups.length) {
-        updatedGroups = [{ id: 'GroupCompanyId' }];
+        errs++; active--;
+        var l = $('plog');
+        l.innerHTML += '<div style="color:#c62828">❌ ' + esc(e.name) + ': No es posible eliminar todos los grupos de este usuario</div>';
+        l.scrollTop = l.scrollHeight;
+        tick(done + errs, total);
+        next();
+        return;
       }
       var upd = { id: e.id };
       upd[gk] = updatedGroups;
       if (entityType === 'User') {
-        if (updatedGroups.length === 1 && updatedGroups[0].id === 'GroupCompanyId') {
-          upd.accessGroupFilter = null;
-        } else {
-          var conditions = updatedGroups.map(function (g) { return { groupId: g.id }; });
-          var rootCondition = conditions.length === 1
-            ? conditions[0]
-            : { relation: 'Or', groupFilterConditions: conditions };
-          var agf = { groupFilterCondition: rootCondition };
-          if (e.accessGroupFilter && e.accessGroupFilter.id) agf.id = e.accessGroupFilter.id;
-          upd.accessGroupFilter = agf;
-        }
+        var conditions = updatedGroups.map(function (g) { return { groupId: g.id }; });
+        var rootCondition = conditions.length === 1
+          ? conditions[0]
+          : { relation: 'Or', groupFilterConditions: conditions };
+        var agf = { groupFilterCondition: rootCondition };
+        if (e.accessGroupFilter && e.accessGroupFilter.id) agf.id = e.accessGroupFilter.id;
+        upd.accessGroupFilter = agf;
       }
       api.call('Set', { typeName: entityType, entity: upd }, function () {
         done++; active--;
