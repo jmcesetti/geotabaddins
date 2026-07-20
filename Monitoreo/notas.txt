@@ -1,0 +1,70 @@
+La idea es utilizar **IndexedDB como una base de datos local y una capa de caché**
+para evitar consultar constantemente la API de Geotab. En lugar de que cada
+gráfico, tablero, KPI o función realice llamadas directas a la API, toda la
+aplicación trabajaría únicamente sobre los datos almacenados en IndexedDB. La
+API de Geotab solo se utilizaría para mantener esa base de datos sincronizada en
+segundo plano.
+
+La arquitectura sería sencilla: un proceso de sincronización se comunica
+periódicamente con Geotab, descarga únicamente los datos nuevos o modificados
+desde la última actualización y los inserta o actualiza en IndexedDB. A partir de
+ese momento, todos los componentes de la aplicación (gráficos, tablas, mapas,
+KPIs, búsquedas, reportes, etc.) consultan únicamente la base de datos local. De
+esta manera, al abrir un dashboard no es necesario esperar múltiples consultas a
+la API; la información ya está disponible localmente y la carga es prácticamente
+instantánea.
+
+La sincronización debe ejecutarse "detrás de cámaras", sin interrumpir al usuario.
+Cada cierto intervalo (por ejemplo, cada cinco minutos) el sistema consulta
+Geotab utilizando la fecha de la última sincronización o los mecanismos de feed
+disponibles, obtiene únicamente los registros nuevos o modificados y actualiza la
+base local. Mientras tanto, el usuario continúa utilizando la aplicación
+normalmente, sin notar que los datos se están actualizando. Incluso podría
+mostrarse un indicador discreto como "Datos actualizados hace 2 minutos" o
+"Sincronizando..." sin afectar el funcionamiento de la interfaz.
+
+La base de datos podría organizarse en diferentes almacenes (Object Stores), por
+ejemplo: **Devices**, **Drivers**, **Groups**, **Rules**, **Trips**,
+**Exceptions**, **StatusData**, **Users** y una tabla de **Settings** para
+almacenar información como la fecha de la última sincronización o la versión de
+la base. Cada almacén tendría los índices necesarios (por ejemplo, DeviceId,
+DriverId, RuleId, fecha, etc.) para realizar búsquedas extremadamente rápidas sin
+necesidad de recorrer todos los registros.
+
+Una de las principales ventajas de este enfoque es el rendimiento. En lugar de
+realizar decenas de consultas a Geotab cada vez que el usuario abre un tablero,
+toda la información se obtiene de IndexedDB en pocos milisegundos. Además, se
+reduce significativamente el consumo de la API de Geotab, ya que únicamente se
+descargan los cambios necesarios durante las sincronizaciones periódicas.
+
+Otra ventaja importante es que la aplicación puede seguir funcionando incluso si
+se pierde momentáneamente la conexión a Internet. El usuario podrá seguir
+consultando históricos, visualizar gráficos, generar reportes y navegar por la
+información almacenada localmente. Simplemente no verá los datos más recientes
+hasta que la próxima sincronización pueda completarse correctamente.
+
+Incluso es posible optimizar aún más el rendimiento almacenando datos
+precalculados. Por ejemplo, durante cada sincronización podrían actualizarse
+tablas de resumen con indicadores mensuales, distancias recorridas, cantidad de
+eventos por conductor, puntajes, ICM u otros KPIs. De esta manera, cuando un
+tablero necesite mostrar esa información, simplemente consultará la tabla de
+resúmenes en lugar de procesar millones de registros en tiempo real.
+
+Desde el punto de vista de la arquitectura, conviene dividir la aplicación en
+cuatro componentes bien definidos. El primero sería un **motor de
+sincronización (Sync Engine)** encargado exclusivamente de comunicarse con la API
+de Geotab y mantener actualizada la base local. El segundo sería **IndexedDB**,
+que actuará como la fuente única de datos de toda la aplicación. El tercero sería
+una **capa de acceso a datos (Repositorio)** con funciones como
+`getTripsByDate()`, `getDriverEvents()` o `getDeviceStatus()`, de manera que el
+resto del código nunca interactúe directamente con IndexedDB. Finalmente, la
+**interfaz de usuario** (gráficos, mapas, KPIs, reportes y tableros) consumirá
+únicamente esa capa de acceso a datos.
+
+Este enfoque ofrece una aplicación mucho más rápida, reduce drásticamente las
+llamadas a la API, mejora la experiencia del usuario y permite escalar a grandes
+volúmenes de información sin degradar el rendimiento. Además, desacopla
+completamente la interfaz del origen de los datos, lo que facilita futuras
+modificaciones, como cambiar el mecanismo de sincronización o incluso reemplazar
+Geotab por otra fuente de información sin tener que reescribir toda la
+aplicación.
