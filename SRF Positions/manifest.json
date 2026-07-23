@@ -7,8 +7,7 @@
         "page": "map",
         "title": "SRF Positions Map Add-in",
         "mapScript": {
-            "src": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.js",
-            "style": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.css"
+            "url": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.html"
         }
         }],
     "isSigned": false
