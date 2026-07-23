@@ -10,6 +10,6 @@
             "src": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.js",
             "style": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.css"
         }
-    ],
+        }],
     "isSigned": false
 }
