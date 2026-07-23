@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>SRF Positions Map Add-in</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 13px;
+            color: #333;
+            background: #f5f5f5;
+        }
+
+        .srf-panel {
+            padding: 16px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .srf-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #1976d2;
+        }
+
+        .srf-coords {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .srf-label {
+            font-weight: 600;
+            color: #666;
+        }
+
+        .srf-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .srf-btn {
+            flex: 1;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .srf-btn--primary {
+            background: #1976d2;
+            color: white;
+        }
+
+        .srf-btn--primary:hover {
+            background: #1565c0;
+        }
+
+        .srf-btn--secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .srf-btn--secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .srf-status {
+            padding: 8px;
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-radius: 4px;
+            font-size: 12px;
+            text-align: center;
+            min-height: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div id="addin-root"></div>
+
+    <script>
+        geotab.addin.srfPositions = function (elt, service) {
+            var circle = null;
+
+            var LAT = -38.2112142;
+            var LNG = -69.2293903;
+            var RADIUS = 12;
+            var Z_INDEX = 10;
+
+            function drawCircle() {
+                if (circle) {
+                    circle.remove();
+                    circle = null;
+                }
+
+                circle = service.canvas.circle({ lat: LAT, lng: LNG }, RADIUS, Z_INDEX)
+                    .change({
+                        "fill": "#FF0000",
+                        "fill-opacity": 0.7,
+                        "stroke": "#CC0000",
+                        "stroke-width": 2
+                    })
+                    .attach("click", function () {
+                        console.log("SRF: circulo clickeado");
+                    })
+                    .attach("over", function (coords) {
+                        service.tooltip.showAt(
+                            coords,
+                            {
+                                main: "Posicion SRF",
+                                secondary: ["Lat: " + LAT, "Lng: " + LNG]
+                            },
+                            1
+                        );
+                    })
+                    .attach("out", function () {
+                        service.tooltip.hide();
+                    });
+
+                console.log("SRF Positions: circulo dibujado en", LAT, LNG);
+            }
+
+            function clearCircle() {
+                if (circle) {
+                    circle.remove();
+                    circle = null;
+                    console.log("SRF Positions: circulo eliminado");
+                }
+            }
+
+            // Build the panel UI
+            elt.innerHTML = [
+                '<div class="srf-panel">',
+                '  <h3 class="srf-title">SRF Positions</h3>',
+                '  <div class="srf-coords">',
+                '    <span class="srf-label">Lat:</span> ' + LAT,
+                '    <br>',
+                '    <span class="srf-label">Lng:</span> ' + LNG,
+                '  </div>',
+                '  <div class="srf-actions">',
+                '    <button id="srf-draw" class="srf-btn srf-btn--primary">Dibujar</button>',
+                '    <button id="srf-clear" class="srf-btn srf-btn--secondary">Limpiar</button>',
+                '  </div>',
+                '  <div id="srf-status" class="srf-status"></div>',
+                '</div>'
+            ].join('');
+
+            elt.querySelector("#srf-draw").addEventListener("click", function () {
+                drawCircle();
+                elt.querySelector("#srf-status").textContent = "Circulo dibujado.";
+            });
+
+            elt.querySelector("#srf-clear").addEventListener("click", function () {
+                clearCircle();
+                elt.querySelector("#srf-status").textContent = "Limpiar.";
+            });
+
+            // Draw immediately on load
+            drawCircle();
+        };
+    </script>
+</body>
+</html>
