@@ -492,25 +492,19 @@
         // ── Add-in entry point ────────────────────────────────────────
 
         geotab.addin.srfPositions = function (elt, service) {
-            api = service;
-
-            return {
-                initialize: function (freshApi, freshState, callback) {
-                    api = freshApi;
-                    api.getSession(function (session) {
-                        window.srfSession = {
-                            user:      session.userName  || "",
-                            sessionId: session.sessionId || "",
-                            database:  session.database  || ""
-                        };
-                        console.log("[SRF] Session:", window.srfSession);
-                        initializeAddIn(elt, service);
-                        callback();
-                    });
-                },
-                focus: function (freshApi) { api = freshApi; },
-                blur:  function () {}
-            };
+            // Map add-ins execute directly — no initialize/focus/blur object.
+            // Load remote data first, then get the session, then boot the UI.
+            Promise.all([loadToken(), loadUnionsData()]).then(function () {
+                service.getSession(function (session) {
+                    window.srfSession = {
+                        user:      session.userName  || "",
+                        sessionId: session.sessionId || "",
+                        database:  session.database  || ""
+                    };
+                    console.log("[SRF] Session loaded:", window.srfSession);
+                    initializeAddIn(elt, service);
+                });
+            });
         };
 
         // ── UI + logic ────────────────────────────────────────────────
@@ -803,9 +797,7 @@
             return str.charAt(0).toUpperCase() + str.slice(1);
         }
 
-        // ── Bootstrap ─────────────────────────────────────────────────
-        loadToken();
-        loadUnionsData();
+        // Bootstrap is handled inside geotab.addin.srfPositions via Promise.all.
     </script>
 </body>
 </html>
