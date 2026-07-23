@@ -57,3 +57,6 @@ jobs:
 
           echo "status=ok" >> "$GITHUB_OUTPUT"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: "JWT: ${{ steps.generate_token.outputs.token }}"
+        run: echo "Token emitted via step name for client parsing"
