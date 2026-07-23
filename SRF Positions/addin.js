@@ -1,61 +1,79 @@
 geotab.addin.srfPositions = function (elt, service) {
-    // var circle = null;
+    var circle = null;
 
+    var LAT = -38.2112142;
+    var LNG = -69.2293903;
+    var RADIUS = 12;
+    var Z_INDEX = 10;
+
+    function drawCircle() {
+        if (circle) {
+            circle.remove();
+            circle = null;
+        }
+
+        circle = service.canvas.circle({ lat: LAT, lng: LNG }, RADIUS, Z_INDEX)
+            .change({
+                "fill": "#FF0000",
+                "fill-opacity": 0.7,
+                "stroke": "#CC0000",
+                "stroke-width": 2
+            })
+            .attach("click", function () {
+                console.log("SRF: circulo clickeado");
+            })
+            .attach("over", function (coords) {
+                service.tooltip.showAt(
+                    coords,
+                    {
+                        main: "Posicion SRF",
+                        secondary: ["Lat: " + LAT, "Lng: " + LNG]
+                    },
+                    1
+                );
+            })
+            .attach("out", function () {
+                service.tooltip.hide();
+            });
+
+        console.log("SRF Positions: circulo dibujado en", LAT, LNG);
+    }
+
+    function clearCircle() {
+        if (circle) {
+            circle.remove();
+            circle = null;
+            console.log("SRF Positions: circulo eliminado");
+        }
+    }
+
+    // Build the panel UI
     elt.innerHTML = [
-        '<div id="srf-positions" style="padding: 20px; background: #e8f5e9; border-radius: 4px;">',
-        '  <h3>✓ Funciona únicamente</h3>',
-        '  <p>El add-in cargó correctamente</p>',
+        '<div class="srf-panel">',
+        '  <h3 class="srf-title">SRF Positions</h3>',
+        '  <div class="srf-coords">',
+        '    <span class="srf-label">Lat:</span> ' + LAT,
+        '    <br>',
+        '    <span class="srf-label">Lng:</span> ' + LNG,
+        '  </div>',
+        '  <div class="srf-actions">',
+        '    <button id="srf-draw" class="srf-btn srf-btn--primary">Dibujar</button>',
+        '    <button id="srf-clear" class="srf-btn srf-btn--secondary">Limpiar</button>',
+        '  </div>',
+        '  <div id="srf-status" class="srf-status"></div>',
         '</div>'
     ].join('');
 
-    console.log("SRF Positions add-in loaded successfully");
+    elt.querySelector("#srf-draw").addEventListener("click", function () {
+        drawCircle();
+        elt.querySelector("#srf-status").textContent = "Circulo dibujado.";
+    });
 
-    // function drawCircle() {
-    //     if (circle) {
-    //         circle.remove();
-    //         circle = null;
-    //     }
+    elt.querySelector("#srf-clear").addEventListener("click", function () {
+        clearCircle();
+        elt.querySelector("#srf-status").textContent = "Limpiar.";
+    });
 
-    //     circle = service.canvas.circle({ lat: -38.2112142, lng: -69.2293903 }, 50, 40)
-    //         .change({
-    //             "fill": "#FF0000",
-    //             "fill-opacity": 0.7,
-    //             "stroke": "#CC0000",
-    //             "stroke-width": 2,
-    //             "r": 12
-    //         })
-    //         .attach("click", function () {
-    //             console.log("Circulo clickeado: -38.2112142, -69.2293903");
-    //         })
-    //         .attach("over", function () {
-    //             service.tooltip.showAt(
-    //                 { x: 0, y: 0 },
-    //                 { main: "Posicion SRF", secondary: ["Lat: -38.2112142", "Lng: -69.2293903"] },
-    //                 1
-    //             );
-    //             console.log("Mouse sobre el circulo");
-    //         })
-    //         .attach("out", function () {
-    //             service.tooltip.hide();
-    //             console.log("Mouse fuera del circulo");
-    //         });
-
-    //     console.log("Circulo SRF dibujado");
-    // }
-
-    // function clearCircle() {
-    //     if (circle) {
-    //         circle.remove();
-    //         circle = null;
-    //     }
-    //     console.log("Circulo SRF eliminado");
-    // }
-
-    // elt.querySelector("#srf-draw").addEventListener("click", function () {
-    //     drawCircle();
-    // }, false);
-
-    // elt.querySelector("#srf-clear").addEventListener("click", function () {
-    //     clearCircle();
-    // }, false);
+    // Draw immediately on load
+    drawCircle();
 };
