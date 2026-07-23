@@ -1,7 +1,0 @@
-{
-  "name": "geotabaddins-functions",
-  "version": "1.0.0",
-  "dependencies": {
-    "jsonwebtoken": "^9.0.2"
-  }
-}
