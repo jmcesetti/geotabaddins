@@ -1,11 +1,11 @@
 {
-    "name": "Camera Position Map Add-in",
+    "name": "SRF Positions Map Add-in",
     "supportEmail": "jm@cesetti.com.ar",
     "version": "1.0",
     "items": [
         {
         "page": "map",
-        "title": "Camera Position Map Add-in",
+        "title": "SRF Positions Map Add-in",
         "mapScript": {
             "src": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.js",
             "style": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.css"
