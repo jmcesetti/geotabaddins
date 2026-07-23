@@ -491,25 +491,38 @@
 
         // ── Add-in entry point ────────────────────────────────────────
 
-        geotab.addin.srfPositions = function (elt, api) {
-            // Map add-ins execute directly — no initialize/focus/blur object.
-            // Load remote data first, then get the session, then boot the UI.
-            Promise.all([loadToken(), loadUnionsData()]).then(function () {
-                api.getSession(function (session) {
-                    window.srfSession = {
-                        user:      session.userName  || "",
-                        sessionId: session.sessionId || "",
-                        database:  session.database  || ""
-                    };
-                    console.log("[SRF] Session loaded:", window.srfSession);
-                    initializeAddIn(elt, service);
-                });
-            });
+        var api;
+        geotab.addin.srfPositions = function (api_, state_) {
+            api = api_;
+            return {
+                initialize: function (freshApi, freshState, callback) {
+                    api = freshApi;
+
+                    Promise.all([loadToken(), loadUnionsData()]).then(function () {
+                        api.getSession(function (session) {
+                            window.srfSession = {
+                                user:      session.userName  || "",
+                                sessionId: session.sessionId || "",
+                                database:  session.database  || ""
+                            };
+                            console.log("[SRF] Session loaded:", window.srfSession);
+
+                            var elt = document.getElementById('srf-addin');
+                            initializeAddIn(elt, api);
+                            callback();
+                        });
+                    });
+                },
+                focus: function (freshApi) {
+                    api = freshApi;
+                },
+                blur: function () {}
+            };
         };
 
         // ── UI + logic ────────────────────────────────────────────────
 
-        function initializeAddIn(elt, service) {
+        function initializeAddIn(elt, apiRef) {
             // Reference circle (kept as overlay)
             var REF_LAT    = -38.2112142;
             var REF_LNG    = -69.2293903;
@@ -583,15 +596,15 @@
             // ── Reference circle ─────────────────────────────────────
             function drawRefCircle() {
                 if (refCircle) { refCircle.remove(); refCircle = null; }
-                refCircle = api.canvas.circle({ lat: REF_LAT, lng: REF_LNG }, 12, 5)
+                refCircle = apiRef.canvas.circle({ lat: REF_LAT, lng: REF_LNG }, 12, 5)
                     .change({ "fill": "#FF0000", "fill-opacity": 0.6, "stroke": "#CC0000", "stroke-width": 2 })
                     .attach("over", function (coords) {
-                        api.tooltip.showAt(coords, {
+                        apiRef.tooltip.showAt(coords, {
                             main: "Referencia SRF",
                             secondary: ["Lat: " + REF_LAT, "Lng: " + REF_LNG]
                         }, 1);
                     })
-                    .attach("out", function () { api.tooltip.hide(); });
+                    .attach("out", function () { apiRef.tooltip.hide(); });
             }
 
             function removeRefCircle() {
@@ -631,7 +644,7 @@
                 clearDeviceCircles();
                 devices.forEach(function (device) {
                     var colors = statusColor(device.status);
-                    var circle = api.canvas.circle(
+                    var circle = apiRef.canvas.circle(
                         { lat: device.lat, lng: device.lon }, 8, 10
                     )
                     .change({
@@ -641,7 +654,7 @@
                         "stroke-width": 1.5
                     })
                     .attach("over", function (coords) {
-                        api.tooltip.showAt(coords, {
+                        apiRef.tooltip.showAt(coords, {
                             main: device.name,
                             secondary: [
                                 "IMEI: "   + device.imei,
@@ -652,7 +665,7 @@
                             ].filter(Boolean)
                         }, 1);
                     })
-                    .attach("out", function () { api.tooltip.hide(); })
+                    .attach("out", function () { apiRef.tooltip.hide(); })
                     .attach("click", function () {
                         highlightDevice(device.imei);
                     });
@@ -713,7 +726,7 @@
                         highlightDevice(imei);
                         // Pan map to device
                         var device = deviceList.find(function (d) { return d.imei === imei; });
-                        if (device && api.page && api.page.go) {
+                        if (device && apiRef.page && apiRef.page.go) {
                             // Navigate map to device position if API supports it
                         }
                     });
