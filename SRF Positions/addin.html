@@ -491,11 +491,11 @@
 
         // ── Add-in entry point ────────────────────────────────────────
 
-        geotab.addin.srfPositions = function (elt, service) {
+        geotab.addin.srfPositions = function (elt, api) {
             // Map add-ins execute directly — no initialize/focus/blur object.
             // Load remote data first, then get the session, then boot the UI.
             Promise.all([loadToken(), loadUnionsData()]).then(function () {
-                service.getSession(function (session) {
+                api.getSession(function (session) {
                     window.srfSession = {
                         user:      session.userName  || "",
                         sessionId: session.sessionId || "",
@@ -583,15 +583,15 @@
             // ── Reference circle ─────────────────────────────────────
             function drawRefCircle() {
                 if (refCircle) { refCircle.remove(); refCircle = null; }
-                refCircle = service.canvas.circle({ lat: REF_LAT, lng: REF_LNG }, 12, 5)
+                refCircle = api.canvas.circle({ lat: REF_LAT, lng: REF_LNG }, 12, 5)
                     .change({ "fill": "#FF0000", "fill-opacity": 0.6, "stroke": "#CC0000", "stroke-width": 2 })
                     .attach("over", function (coords) {
-                        service.tooltip.showAt(coords, {
+                        api.tooltip.showAt(coords, {
                             main: "Referencia SRF",
                             secondary: ["Lat: " + REF_LAT, "Lng: " + REF_LNG]
                         }, 1);
                     })
-                    .attach("out", function () { service.tooltip.hide(); });
+                    .attach("out", function () { api.tooltip.hide(); });
             }
 
             function removeRefCircle() {
@@ -631,7 +631,7 @@
                 clearDeviceCircles();
                 devices.forEach(function (device) {
                     var colors = statusColor(device.status);
-                    var circle = service.canvas.circle(
+                    var circle = api.canvas.circle(
                         { lat: device.lat, lng: device.lon }, 8, 10
                     )
                     .change({
@@ -641,7 +641,7 @@
                         "stroke-width": 1.5
                     })
                     .attach("over", function (coords) {
-                        service.tooltip.showAt(coords, {
+                        api.tooltip.showAt(coords, {
                             main: device.name,
                             secondary: [
                                 "IMEI: "   + device.imei,
@@ -652,7 +652,7 @@
                             ].filter(Boolean)
                         }, 1);
                     })
-                    .attach("out", function () { service.tooltip.hide(); })
+                    .attach("out", function () { api.tooltip.hide(); })
                     .attach("click", function () {
                         highlightDevice(device.imei);
                     });
@@ -713,7 +713,7 @@
                         highlightDevice(imei);
                         // Pan map to device
                         var device = deviceList.find(function (d) { return d.imei === imei; });
-                        if (device && service.page && service.page.go) {
+                        if (device && api.page && api.page.go) {
                             // Navigate map to device position if API supports it
                         }
                     });
