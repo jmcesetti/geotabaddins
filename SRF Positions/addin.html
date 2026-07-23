@@ -94,8 +94,9 @@
 <body>
     <script>
         const TOKEN_URL = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt";
+        let api;
 
-        async function initializeToken() {
+        async function loadToken() {
             try {
                 const res = await fetch(TOKEN_URL);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -108,6 +109,32 @@
         }
 
         geotab.addin.srfPositions = function (elt, service) {
+            api = service;
+
+            return {
+                initialize: function (freshApi, freshState, callback) {
+                    api = freshApi;
+
+                    api.getSession(function (session) {
+                        const user = session.userName || '';
+                        const sessionId = session.sessionId || '';
+                        const database = session.database || '';
+
+                        console.log("[SRF] Session loaded:", { user, sessionId, database });
+
+                        window.srfSession = { user, sessionId, database };
+                        initializeAddIn(elt);
+                        callback();
+                    });
+                },
+                focus: function (freshApi) {
+                    api = freshApi;
+                },
+                blur: function () {}
+            };
+        };
+
+        function initializeAddIn(elt) {
             var circle = null;
             var LAT = -38.2112142;
             var LNG = -69.2293903;
@@ -182,10 +209,10 @@
             });
 
             drawCircle();
-        };
+        }
 
-        // Initialize token on page load
-        initializeToken();
+        // Load token on page load
+        loadToken();
     </script>
 </body>
 </html>
