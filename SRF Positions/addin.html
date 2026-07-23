@@ -499,18 +499,32 @@
                     api = freshApi;
 
                     Promise.all([loadToken(), loadUnionsData()]).then(function () {
-                        api.getSession(function (session) {
-                            window.srfSession = {
-                                user:      session.userName  || "",
-                                sessionId: session.sessionId || "",
-                                database:  session.database  || ""
-                            };
-                            console.log("[SRF] Session loaded:", window.srfSession);
+                        // Try to get session, but continue even if it fails
+                        try {
+                            api.getSession(function (session) {
+                                window.srfSession = {
+                                    user:      session.userName  || "",
+                                    sessionId: session.sessionId || "",
+                                    database:  session.database  || ""
+                                };
+                                console.log("[SRF] Session loaded:", window.srfSession);
 
+                                var elt = document.getElementById('srf-addin');
+                                initializeAddIn(elt, api);
+                                callback();
+                            });
+                        } catch (err) {
+                            console.warn("[SRF] Session failed:", err.message);
+                            // Initialize with empty session, allow continue
+                            window.srfSession = {
+                                user:      "",
+                                sessionId: "",
+                                database:  ""
+                            };
                             var elt = document.getElementById('srf-addin');
                             initializeAddIn(elt, api);
                             callback();
-                        });
+                        }
                     });
                 },
                 focus: function (freshApi) {
