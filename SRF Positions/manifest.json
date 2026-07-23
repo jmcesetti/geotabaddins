@@ -1,7 +1,7 @@
 {
     "name": "SRF Positions Map Add-in",
     "supportEmail": "jm@cesetti.com.ar",
-    "version": "1.1",
+    "version": "1.2",
     "items": [
         {
         "page": "map",
