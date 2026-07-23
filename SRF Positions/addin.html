@@ -92,12 +92,23 @@
     </style>
 </head>
 <body>
-    <div id="addin-root"></div>
-
     <script>
+        const TOKEN_URL = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt";
+
+        async function initializeToken() {
+            try {
+                const res = await fetch(TOKEN_URL);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const token = await res.text();
+                window.srfToken = token.trim();
+                console.log("[SRF] Token loaded");
+            } catch (err) {
+                console.error("[SRF] Failed to load token:", err.message);
+            }
+        }
+
         geotab.addin.srfPositions = function (elt, service) {
             var circle = null;
-
             var LAT = -38.2112142;
             var LNG = -69.2293903;
             var RADIUS = 12;
@@ -144,7 +155,6 @@
                 }
             }
 
-            // Build the panel UI
             elt.innerHTML = [
                 '<div class="srf-panel">',
                 '  <h3 class="srf-title">SRF Positions</h3>',
@@ -171,9 +181,11 @@
                 elt.querySelector("#srf-status").textContent = "Limpiar.";
             });
 
-            // Draw immediately on load
             drawCircle();
         };
+
+        // Initialize token on page load
+        initializeToken();
     </script>
 </body>
 </html>
