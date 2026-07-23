@@ -1,13 +1,15 @@
 {
-    "name": "Red Circle Map Add-in",
-    "supportEmail": "martinezmacanek98@gmail.com",
+    "name": "Camera Position Map Add-in",
+    "supportEmail": "jm@cesetti.com.ar",
     "version": "1.0",
-    "items": [{
+    "items": [
+        {
         "page": "map",
-        "title": "Red Circle",
+        "title": "Camera Position Map Add-in",
         "mapScript": {
-            "src": "/addin/addin.js",
-            "style": "/addin/addin.css"
+            "src": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.js",
+            "style": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.css"
         }
-    }]
+    ],
+    "isSigned": false
 }
