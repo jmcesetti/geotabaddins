@@ -1,0 +1,615 @@
+{
+"DHLAR": {
+"activos": {},
+"alarmsCount": 0,
+"deIdAnalyticsAllowed": false,
+"deIdBacklogEnabled": false,
+"deIdEnableStrictBlurring": false,
+"deIdEnabled": false,
+"deviceRetentionMinutes": null,
+"enableAdasCalibration": false,
+"exclusivePartnerOnly": true,
+"id": 61653,
+"isOrganizationProfileEnabled": false,
+"liveVideoTimeoutSeconds": 30,
+"name": "DHLAR",
+"partnerId": 701,
+"purgeDays": 31,
+"purgeDaysAuxiliaryCameras": 31,
+"purgeDaysFrontCamera": 31,
+"purgeDaysRearCamera": 31,
+"resellerName": "CESETTI"
+},
+"Laurenzano": {
+"activos": {
+"357660106049935": {
+        "accuracy": 0,
+        "alt": 13.0872802734375,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106049935",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-23T13:28:42.000Z",
+        "lat": -34.68071617,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": -58.35102552,
+        "name": "AH683VH",
+        "speed": 7.340000152587891,
+        "status": "online",
+        "vehicleType": "Trailer"
+},
+"357660106049968": {
+        "accuracy": 0,
+        "alt": 42.77099609375,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106049968",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-22T16:07:55.000Z",
+        "lat": -34.66765077,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": -58.43664756,
+        "name": "AH683VX",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Trailer"
+},
+"357660106049984": {
+        "accuracy": 0,
+        "alt": 38.2261962890625,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106049984",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-14T21:36:59.000Z",
+        "lat": -34.6675442,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": -58.4368217,
+        "name": "AH683VY",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+},
+"357660106054638": {
+        "accuracy": 0,
+        "alt": 17.270263671875,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106054638",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-23T13:29:57.000Z",
+        "lat": -34.6903469,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": -58.35558282,
+        "name": "AH938LU",
+        "speed": 0.5299999713897705,
+        "status": "online",
+        "vehicleType": "Trailer"
+},
+"357660106055353": {
+        "alt": null,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "groupId": -1,
+        "iccid": null,
+        "imei": "357660106055353",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": null,
+        "lat": null,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": null,
+        "name": "AI367ZX",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+},
+"357660106076052": {
+        "accuracy": 10.720000267028809,
+        "alt": 86.9598388671875,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106076052",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-23T13:30:37.000Z",
+        "lat": -31.55715876,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": -61.5329783,
+        "name": "AH938LT",
+        "speed": 18.200000762939453,
+        "status": "online",
+        "vehicleType": "Trailer"
+},
+"357660106076144": {
+        "accuracy": 0,
+        "alt": 41.6807861328125,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106076144",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-22T16:08:40.000Z",
+        "lat": -34.667565,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": -58.43672127,
+        "name": "AH683VG",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Trailer"
+},
+"357660106076201": {
+        "accuracy": 0,
+        "alt": 43.01019287109375,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106076201",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-22T15:11:21.000Z",
+        "lat": -34.66717592,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": -58.43724484,
+        "name": "AI298EI",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+},
+"357660106120819": {
+        "alt": null,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "groupId": -1,
+        "iccid": null,
+        "imei": "357660106120819",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": null,
+        "lat": null,
+        "liveVideoTimeoutSeconds": 36000,
+        "lon": null,
+        "name": "AI367ZW",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+}
+},
+"alarmsCount": 0,
+"deIdAnalyticsAllowed": false,
+"deIdBacklogEnabled": false,
+"deIdEnableStrictBlurring": false,
+"deIdEnabled": false,
+"deviceRetentionMinutes": null,
+"enableAdasCalibration": false,
+"exclusivePartnerOnly": false,
+"id": 59257,
+"isOrganizationProfileEnabled": true,
+"liveVideoTimeoutSeconds": 36000,
+"name": "Laurenzano",
+"partnerId": 701,
+"purgeDays": 31,
+"purgeDaysAuxiliaryCameras": 31,
+"purgeDaysFrontCamera": 31,
+"purgeDaysRearCamera": 31,
+"resellerName": "CESETTI"
+},
+"Servigruas": {
+"activos": {
+"357660104055504": {
+        "accuracy": 0,
+        "alt": 447.863037109375,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "8954079900030709999",
+        "imei": "357660104055504",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": true,
+        "lastSeenOnline": "2025-12-11T14:23:29.000Z",
+        "lat": -38.45648538,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": -68.50294955,
+        "name": "357660104055504",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+},
+"357660106054810": {
+        "alt": null,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "groupId": -1,
+        "iccid": null,
+        "imei": "357660106054810",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": null,
+        "lat": null,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": null,
+        "name": "357660106054810",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+},
+"357660106055544": {
+        "alt": null,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "groupId": -1,
+        "iccid": null,
+        "imei": "357660106055544",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": null,
+        "lat": null,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": null,
+        "name": "357660106055544",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+},
+"357660106055601": {
+        "alt": null,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "groupId": -1,
+        "iccid": null,
+        "imei": "357660106055601",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": null,
+        "lat": null,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": null,
+        "name": "357660106055601",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+},
+"357660106078058": {
+        "alt": null,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "groupId": -1,
+        "iccid": null,
+        "imei": "357660106078058",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": null,
+        "lat": null,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": null,
+        "name": "357660106078058",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+}
+},
+"alarmsCount": 0,
+"deIdAnalyticsAllowed": false,
+"deIdBacklogEnabled": false,
+"deIdEnableStrictBlurring": false,
+"deIdEnabled": false,
+"deviceRetentionMinutes": null,
+"enableAdasCalibration": false,
+"exclusivePartnerOnly": false,
+"id": 62018,
+"isOrganizationProfileEnabled": true,
+"liveVideoTimeoutSeconds": 30,
+"name": "Servigruas",
+"partnerId": 173,
+"purgeDays": 31,
+"purgeDaysAuxiliaryCameras": 31,
+"purgeDaysFrontCamera": 31,
+"purgeDaysRearCamera": 31,
+"resellerName": "GEOTAB"
+},
+"logisticalaurenzano": {
+"activos": {
+"357660106054828": {
+        "accuracy": 0,
+        "alt": 26.71124267578125,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106054828",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-22T15:14:47.000Z",
+        "lat": -34.66725597,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": -58.43736861,
+        "name": "357660106054828",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+}
+},
+"alarmsCount": 0,
+"deIdAnalyticsAllowed": false,
+"deIdBacklogEnabled": false,
+"deIdEnableStrictBlurring": false,
+"deIdEnabled": false,
+"deviceRetentionMinutes": null,
+"enableAdasCalibration": false,
+"exclusivePartnerOnly": false,
+"id": 56088,
+"isOrganizationProfileEnabled": true,
+"liveVideoTimeoutSeconds": 30,
+"name": "logisticalaurenzano",
+"partnerId": 173,
+"purgeDays": 31,
+"purgeDaysAuxiliaryCameras": 31,
+"purgeDaysFrontCamera": 31,
+"purgeDaysRearCamera": 31,
+"resellerName": "GEOTAB"
+},
+"prod-64fb2a8f-a41d-42cc-b0fb-6d38553c48b2-organization": {
+"activos": {
+"357660105573505": {
+        "accuracy": 0,
+        "alt": 32.61578369140625,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "8954079900036772942",
+        "imei": "357660105573505",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": true,
+        "lastSeenOnline": "2026-07-23T13:32:16.000Z",
+        "lat": -34.6572544,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": -58.38518658,
+        "name": "357660105573505",
+        "speed": 1.690000057220459,
+        "status": "online",
+        "vehicleType": "Van"
+},
+"357660106054794": {
+        "accuracy": 0,
+        "alt": 1206.2725830078125,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106054794",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-22T13:52:53.000Z",
+        "lat": -24.86459597,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": -65.40105087,
+        "name": "357660106054794",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+},
+"357660106077936": {
+        "accuracy": 0,
+        "alt": 1246.06787109375,
+        "cameras": [
+        {
+        "cameraId": 1,
+        "name": "Front Camera"
+        },
+        {
+        "cameraId": 2,
+        "name": "Rear Camera"
+        }
+        ],
+        "deviceModel": "AI-12",
+        "firmwareVersion": "3.15.15",
+        "groupId": -1,
+        "iccid": "unknown",
+        "imei": "357660106077936",
+        "isModemMqttWakeupSupported": false,
+        "isYawnEvFeatureEnabledForPartnerOfDevice": false,
+        "lastSeenOnline": "2026-07-02T22:35:18.000Z",
+        "lat": -24.24977127,
+        "liveVideoTimeoutSeconds": 30,
+        "lon": -65.26314998,
+        "name": "357660106077936",
+        "speed": null,
+        "status": "offline",
+        "vehicleType": "Private"
+}
+},
+"alarmsCount": 0,
+"deIdAnalyticsAllowed": false,
+"deIdBacklogEnabled": false,
+"deIdEnableStrictBlurring": false,
+"deIdEnabled": false,
+"deviceRetentionMinutes": null,
+"enableAdasCalibration": false,
+"exclusivePartnerOnly": false,
+"id": 56019,
+"isOrganizationProfileEnabled": true,
+"liveVideoTimeoutSeconds": 30,
+"name": "prod-64fb2a8f-a41d-42cc-b0fb-6d38553c48b2-organization",
+"partnerId": 173,
+"purgeDays": 31,
+"purgeDaysAuxiliaryCameras": 31,
+"purgeDaysFrontCamera": 31,
+"purgeDaysRearCamera": 31,
+"resellerName": "GEOTAB"
+}
+}
