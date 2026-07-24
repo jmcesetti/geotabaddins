@@ -5,11 +5,13 @@
     <title>SRF Positions Map Add-in</title>
 </head>
 <body>
+    <div id="srfPositions"></div>
+
     <script>
         console.log("[SRF] Script loading...");
 
         geotab.addin.srfPositions = function (api_, state_) {
-            console.log("[SRF] geotab.addin.srfPositions called, api_:", typeof api_);
+            console.log("[SRF] geotab.addin.srfPositions called");
             var api = api_;
             return {
                 initialize: function (freshApi, freshState, callback) {
