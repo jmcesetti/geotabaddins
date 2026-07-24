@@ -10,8 +10,9 @@
 
         geotab.addin.srfPositions = function (api, state) {
             console.log("[SRF] geotab.addin.srfPositions called");
+            console.log("[SRF] Returning object with initialize, focus, blur");
 
-            return {
+            var obj = {
                 initialize: function (freshApi, freshState, callback) {
                     console.log("[SRF] initialize() called");
                     api = freshApi;
@@ -79,6 +80,9 @@
                     console.log("[SRF] blur() called");
                 }
             };
+
+            console.log("[SRF] Object properties:", Object.keys(obj));
+            return obj;
         };
 
         console.log("[SRF] Script loaded");
