@@ -8,30 +8,17 @@
     <script>
         console.log("[SRF] Script loading...");
 
-        geotab.addin.srfPositions = function (api_, state_) {
+        geotab.addin.srfPositions = function (elt, service) {
             console.log("[SRF] geotab.addin.srfPositions called");
-            var api = api_;
-            return {
-                initialize: function (freshApi, freshState, callback) {
-                    console.log("[SRF] initialize() called");
-                    api = freshApi;
+            console.log("[SRF] elt:", elt);
+            console.log("[SRF] service:", service);
 
-                    api.getSession(function (session) {
-                        console.log("[SRF] Session:", session);
-                        console.log("[SRF] Database:", session.database);
-                        console.log("[SRF] User:", session.userName);
-                        console.log("[SRF] SessionId:", session.sessionId);
-                        callback();
-                    });
-                },
-                focus: function (freshApi) {
-                    console.log("[SRF] focus() called");
-                    api = freshApi;
-                },
-                blur: function () {
-                    console.log("[SRF] blur() called");
-                }
-            };
+            service.getSession(function (session) {
+                console.log("[SRF] Session:", session);
+                console.log("[SRF] Database:", session.database);
+                console.log("[SRF] User:", session.userName);
+                console.log("[SRF] SessionId:", session.sessionId);
+            });
         };
 
         console.log("[SRF] Script loaded, geotab.addin.srfPositions defined");
