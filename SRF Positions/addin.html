@@ -31,18 +31,14 @@
             color: #1976d2;
         }
 
-        .srf-coords {
-            background: #f5f5f5;
-            padding: 12px;
-            border-radius: 4px;
-            margin-bottom: 12px;
-            font-size: 12px;
-            line-height: 1.6;
-        }
-
-        .srf-label {
-            font-weight: 600;
+        .srf-status {
+            padding: 8px;
+            background: #f0f0f0;
             color: #666;
+            border-radius: 4px;
+            font-size: 12px;
+            min-height: 24px;
+            margin-bottom: 12px;
         }
 
         .srf-actions {
@@ -67,27 +63,13 @@
             color: white;
         }
 
-        .srf-btn--primary:hover {
+        .srf-btn--primary:hover:not(:disabled) {
             background: #1565c0;
         }
 
-        .srf-btn--secondary {
-            background: #e0e0e0;
-            color: #333;
-        }
-
-        .srf-btn--secondary:hover {
-            background: #d0d0d0;
-        }
-
-        .srf-status {
-            padding: 8px;
-            background: #e8f5e9;
-            color: #2e7d32;
-            border-radius: 4px;
-            font-size: 12px;
-            text-align: center;
-            min-height: 24px;
+        .srf-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
     </style>
 </head>
@@ -95,84 +77,159 @@
     <div id="addin-root"></div>
 
     <script>
-        geotab.addin.srfPositions = function (elt, service) {
-            var circle = null;
+        var TOKEN_URL = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt";
+        var UNIONS_CSV_URL = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/unions.csv";
+        var SURFSIGHT_API_BASE = "https://api-prod.surfsight.net/v2";
 
-            var LAT = -38.2112142;
-            var LNG = -69.2293903;
-            var RADIUS = 12;
-            var Z_INDEX = 10;
+        var unionData = null;
 
-            function drawCircle() {
-                if (circle) {
-                    circle.remove();
-                    circle = null;
-                }
+        async function loadToken() {
+            try {
+                var res = await fetch(TOKEN_URL);
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                window.srfToken = (await res.text()).trim();
+                console.log("[SRF] Token loaded");
+                return true;
+            } catch (err) {
+                console.error("[SRF] Failed to load token:", err.message);
+                return false;
+            }
+        }
 
-                circle = service.canvas.circle({ lat: LAT, lng: LNG }, RADIUS, Z_INDEX)
-                    .change({
-                        "fill": "#FF0000",
-                        "fill-opacity": 0.7,
-                        "stroke": "#CC0000",
-                        "stroke-width": 2
-                    })
-                    .attach("click", function () {
-                        console.log("SRF: circulo clickeado");
-                    })
-                    .attach("over", function (coords) {
-                        service.tooltip.showAt(
-                            coords,
-                            {
-                                main: "Posicion SRF",
-                                secondary: ["Lat: " + LAT, "Lng: " + LNG]
-                            },
-                            1
-                        );
-                    })
-                    .attach("out", function () {
-                        service.tooltip.hide();
+        async function loadUnionsData() {
+            try {
+                var res = await fetch(UNIONS_CSV_URL);
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                var csv = await res.text();
+                var lines = csv.trim().split("\n");
+                var headers = lines[0].split(",");
+                unionData = {};
+                for (var i = 1; i < lines.length; i++) {
+                    var values = lines[i].split(",");
+                    var record = {};
+                    headers.forEach(function (h, idx) {
+                        record[h.trim()] = (values[idx] || "").trim();
                     });
-
-                console.log("SRF Positions: circulo dibujado en", LAT, LNG);
-            }
-
-            function clearCircle() {
-                if (circle) {
-                    circle.remove();
-                    circle = null;
-                    console.log("SRF Positions: circulo eliminado");
+                    if (record.geotabdb) {
+                        unionData[record.geotabdb.toLowerCase()] = record;
+                    }
                 }
+                console.log("[SRF] Unions loaded:", unionData);
+                return true;
+            } catch (err) {
+                console.error("[SRF] Failed to load unions:", err.message);
+                return false;
+            }
+        }
+
+        function getUnionByDatabase(database) {
+            if (!unionData || !database) return null;
+            return unionData[database.toLowerCase()] || null;
+        }
+
+        async function fetchSurfsightDevices(unionId, token) {
+            var url = SURFSIGHT_API_BASE + "/organizations/" + encodeURIComponent(unionId) + "/devices";
+            var res = await fetch(url, {
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "Accept": "application/json"
+                }
+            });
+
+            if (!res.ok) {
+                var body = "";
+                try { body = await res.text(); } catch (_) {}
+                throw new Error("Surfsight API " + res.status + (body ? ": " + body.substring(0, 120) : ""));
             }
 
-            // Build the panel UI
+            var json = await res.json();
+            var raw = Array.isArray(json) ? json : (json.data || json.devices || json.results || []);
+
+            return raw.map(function (d) {
+                return {
+                    imei:        d.imei        || d.deviceId   || d.id   || "",
+                    name:        d.name        || d.deviceName || d.imei || "Sin nombre",
+                    lat:         parseFloat(d.lat  || d.latitude  || d.gps && d.gps.lat  || 0),
+                    lon:         parseFloat(d.lon  || d.longitude || d.gps && d.gps.lon  || 0),
+                    status:     (d.status      || d.deviceStatus || "unknown").toLowerCase(),
+                    deviceModel: d.deviceModel || d.model || d.type || ""
+                };
+            }).filter(function (d) {
+                return !(d.lat === 0 && d.lon === 0);
+            });
+        }
+
+        geotab.addin.srfPositions = function (elt, service) {
             elt.innerHTML = [
                 '<div class="srf-panel">',
                 '  <h3 class="srf-title">SRF Positions</h3>',
-                '  <div class="srf-coords">',
-                '    <span class="srf-label">Lat:</span> ' + LAT,
-                '    <br>',
-                '    <span class="srf-label">Lng:</span> ' + LNG,
-                '  </div>',
+                '  <div id="srf-status" class="srf-status">Inicializando...</div>',
                 '  <div class="srf-actions">',
-                '    <button id="srf-draw" class="srf-btn srf-btn--primary">Dibujar</button>',
-                '    <button id="srf-clear" class="srf-btn srf-btn--secondary">Limpiar</button>',
+                '    <button id="srf-load" class="srf-btn srf-btn--primary">Cargar dispositivos</button>',
                 '  </div>',
-                '  <div id="srf-status" class="srf-status"></div>',
                 '</div>'
             ].join('');
 
-            elt.querySelector("#srf-draw").addEventListener("click", function () {
-                drawCircle();
-                elt.querySelector("#srf-status").textContent = "Circulo dibujado.";
+            var $status = elt.querySelector("#srf-status");
+            var $loadBtn = elt.querySelector("#srf-load");
+
+            function setStatus(text) {
+                $status.textContent = text;
+            }
+
+            // Load token and unions on init
+            Promise.all([loadToken(), loadUnionsData()]).then(function (results) {
+                if (!results[0] || !results[1]) {
+                    setStatus("Error al cargar datos iniciales");
+                    return;
+                }
+                setStatus("Listo");
+                $loadBtn.disabled = false;
             });
 
-            elt.querySelector("#srf-clear").addEventListener("click", function () {
-                clearCircle();
-                elt.querySelector("#srf-status").textContent = "Limpiar.";
+            $loadBtn.addEventListener("click", async function () {
+                console.log("[SRF] Load button clicked");
+
+                if (!window.srfToken) {
+                    setStatus("Error: Token no disponible");
+                    console.error("[SRF] Token not available");
+                    return;
+                }
+
+                // Get current database from service
+                service.getSession(function (session) {
+                    var database = session.database || "";
+                    console.log("[SRF] Database:", database);
+
+                    var union = getUnionByDatabase(database);
+                    if (!union) {
+                        setStatus("Error: No hay unión para esta base de datos");
+                        console.error("[SRF] No union for database:", database);
+                        return;
+                    }
+
+                    var unionId = union.id;
+                    console.log("[SRF] Union ID:", unionId);
+
+                    $loadBtn.disabled = true;
+                    setStatus("Consultando Surfsight API...");
+
+                    fetchSurfsightDevices(unionId, window.srfToken)
+                        .then(function (devices) {
+                            console.log("[SRF] Devices fetched:", devices);
+                            setStatus("Se cargaron " + devices.length + " dispositivos (ver consola)");
+                            $loadBtn.disabled = false;
+                        })
+                        .catch(function (err) {
+                            console.error("[SRF] Surfsight error:", err);
+                            setStatus("Error: " + err.message.substring(0, 50));
+                            $loadBtn.disabled = false;
+                        });
+                });
             });
 
-            // Draw immediately on load
-            drawCircle();
+            setStatus("Cargando datos...");
+            $loadBtn.disabled = true;
         };
     </script>
 </body>
