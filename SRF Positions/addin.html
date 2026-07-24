@@ -127,8 +127,8 @@
             return unionData[database.toLowerCase()] || null;
         }
 
-        async function fetchSurfsightDevices(unionId, token) {
-            var url = SURFSIGHT_API_BASE + "/organizations/" + encodeURIComponent(unionId) + "/devices";
+        async function fetchSurfsightOrganizations(token) {
+            var url = SURFSIGHT_API_BASE + "/organizations";
             var res = await fetch(url, {
                 headers: {
                     "Authorization": "Bearer " + token,
@@ -139,11 +139,30 @@
             if (!res.ok) {
                 var body = "";
                 try { body = await res.text(); } catch (_) {}
-                throw new Error("Surfsight API " + res.status + (body ? ": " + body.substring(0, 120) : ""));
+                throw new Error("Surfsight API (organizations) " + res.status);
             }
 
             var json = await res.json();
-            var raw = Array.isArray(json) ? json : (json.data || json.devices || json.results || []);
+            return json.data || [];
+        }
+
+        async function fetchSurfsightDevices(orgId, token) {
+            var url = SURFSIGHT_API_BASE + "/organizations/" + encodeURIComponent(orgId) + "/devices";
+            var res = await fetch(url, {
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "Accept": "application/json"
+                }
+            });
+
+            if (!res.ok) {
+                var body = "";
+                try { body = await res.text(); } catch (_) {}
+                throw new Error("Surfsight API (devices) " + res.status);
+            }
+
+            var json = await res.json();
+            var raw = json.data || [];
 
             return raw.map(function (d) {
                 return {
@@ -196,7 +215,6 @@
                     return;
                 }
 
-                // Get current database from service
                 api.getSession(function (session) {
                     var database = session.database || "";
                     console.log("[SRF] Database:", database);
@@ -208,16 +226,39 @@
                         return;
                     }
 
-                    var unionId = union.id;
-                    console.log("[SRF] Union ID:", unionId);
+                    var unionName = union.name;
+                    console.log("[SRF] Union name:", unionName);
 
                     $loadBtn.disabled = true;
                     setStatus("Consultando Surfsight API...");
 
-                    fetchSurfsightDevices(unionId, window.srfToken)
+                    fetchSurfsightOrganizations(window.srfToken)
+                        .then(function (orgs) {
+                            console.log("[SRF] Organizations fetched:", orgs);
+
+                            var matchedOrg = null;
+                            for (var i = 0; i < orgs.length; i++) {
+                                if (orgs[i].name.toLowerCase() === unionName.toLowerCase()) {
+                                    matchedOrg = orgs[i];
+                                    break;
+                                }
+                            }
+
+                            if (!matchedOrg) {
+                                setStatus("Error: No se encontró organización en Surfsight");
+                                console.error("[SRF] No matching org for:", unionName);
+                                $loadBtn.disabled = false;
+                                return;
+                            }
+
+                            console.log("[SRF] Matched org:", matchedOrg);
+                            return fetchSurfsightDevices(matchedOrg.id, window.srfToken);
+                        })
                         .then(function (devices) {
-                            console.log("[SRF] Devices fetched:", devices);
-                            setStatus("Se cargaron " + devices.length + " dispositivos (ver consola)");
+                            if (devices) {
+                                console.log("[SRF] Devices fetched:", devices);
+                                setStatus("Se cargaron " + devices.length + " dispositivos (ver consola)");
+                            }
                             $loadBtn.disabled = false;
                         })
                         .catch(function (err) {
