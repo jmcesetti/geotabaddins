@@ -159,7 +159,7 @@
             });
         }
 
-        geotab.addin.srfPositions = function (elt, service) {
+        geotab.addin.srfPositions = function (elt, api) {
             elt.innerHTML = [
                 '<div class="srf-panel">',
                 '  <h3 class="srf-title">SRF Positions</h3>',
@@ -197,7 +197,7 @@
                 }
 
                 // Get current database from service
-                service.getSession(function (session) {
+                api.getSession(function (session) {
                     var database = session.database || "";
                     console.log("[SRF] Database:", database);
 
