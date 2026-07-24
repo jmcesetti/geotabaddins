@@ -180,12 +180,16 @@
 
         // Entry point: return { initialize, focus, blur }
         geotab.addin.srfPositions = function (api_, state_) {
+            console.log("[SRF] geotab.addin.srfPositions called");
             var api = api_;
             return {
                 initialize: function (freshApi, freshState, callback) {
+                    console.log("[SRF] initialize() called");
                     api = freshApi;
 
                     var elt = document.getElementById('addin-root');
+                    console.log("[SRF] elt element:", elt);
+
                     elt.innerHTML = [
                         '<div class="srf-panel">',
                         '  <h3 class="srf-title">SRF Positions</h3>',
@@ -198,21 +202,28 @@
 
                     var $status = elt.querySelector("#srf-status");
                     var $loadBtn = elt.querySelector("#srf-load");
+                    console.log("[SRF] Button element:", $loadBtn);
 
                     function setStatus(text) {
+                        console.log("[SRF] Status:", text);
                         $status.textContent = text;
                     }
 
                     // Load token and unions
+                    console.log("[SRF] Loading token and unions...");
                     Promise.all([loadToken(), loadUnionsData()]).then(function (results) {
+                        console.log("[SRF] Token/Unions load results:", results);
                         if (!results[0] || !results[1]) {
                             setStatus("Error al cargar datos iniciales");
+                            console.error("[SRF] Failed to load token or unions");
                             callback();
                             return;
                         }
 
                         // Get session
+                        console.log("[SRF] Calling api.getSession...");
                         api.getSession(function (session) {
+                            console.log("[SRF] Session received:", session);
                             var database = session.database || "";
                             console.log("[SRF] Database from session:", database);
 
@@ -220,6 +231,7 @@
                             if (!union) {
                                 setStatus("Sin unión para esta base de datos");
                                 console.warn("[SRF] No union for database:", database);
+                                console.warn("[SRF] Available unions:", Object.keys(unionData));
                                 callback();
                                 return;
                             }
