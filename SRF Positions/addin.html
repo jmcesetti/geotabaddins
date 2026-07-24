@@ -537,17 +537,6 @@
         // ── UI + logic ────────────────────────────────────────────────
 
         function initializeAddIn(elt, apiRef) {
-            // Reference circle (kept as overlay)
-            var REF_LAT    = -38.2112142;
-            var REF_LNG    = -69.2293903;
-            var refCircle  = null;
-            var refVisible = true;
-
-            // Device circles: { imei: circleObject }
-            var deviceCircles = {};
-            var deviceList    = [];
-            var activeImei    = null;
-
             // ── Resolve union ────────────────────────────────────────
             var union = getUnionByDatabase(window.srfSession.database);
             if (union) {
@@ -556,6 +545,8 @@
             } else {
                 console.warn("[SRF] No union for database:", window.srfSession.database);
             }
+
+            console.log("[SRF] Union resolved:", union);
 
             // ── Render shell ─────────────────────────────────────────
             elt.innerHTML = [
@@ -566,246 +557,41 @@
                         union ? escHtml(union.name || union.id) : "Sin unión",
                 '    </span>',
                 '  </div>',
-                '  <div class="srf-statusbar">',
-                '    <span class="srf-statusbar-dot" id="srf-dot"></span>',
-                '    <span id="srf-status-text">Listo</span>',
-                '  </div>',
                 '  <div class="srf-controls">',
                 '    <button id="srf-load"  class="srf-btn srf-btn--primary">Cargar dispositivos</button>',
-                '    <button id="srf-clear" class="srf-btn srf-btn--ghost">Limpiar</button>',
-                '  </div>',
-                '  <div class="srf-section-head">',
-                '    <span class="srf-section-label">Dispositivos</span>',
-                '    <span class="srf-count-badge" id="srf-count" style="display:none"></span>',
-                '  </div>',
-                '  <div class="srf-device-list" id="srf-device-list">',
-                '    <div class="srf-empty">',
-                '      <span class="srf-empty-icon">&#x1F4CD;</span>',
-                '      Presioná "Cargar dispositivos"',
-                '    </div>',
-                '  </div>',
-                '  <div class="srf-footer">',
-                '    <span class="srf-ref-label">',
-                '      <span class="srf-ref-dot"></span> Círculo de referencia',
-                '    </span>',
-                '    <button id="srf-ref-toggle" class="srf-toggle-btn">Ocultar</button>',
                 '  </div>',
                 '</div>'
             ].join("");
 
-            var $dot        = elt.querySelector("#srf-dot");
-            var $statusText = elt.querySelector("#srf-status-text");
-            var $count      = elt.querySelector("#srf-count");
-            var $listEl     = elt.querySelector("#srf-device-list");
-            var $loadBtn    = elt.querySelector("#srf-load");
-            var $clearBtn   = elt.querySelector("#srf-clear");
-            var $refToggle  = elt.querySelector("#srf-ref-toggle");
-
-            // ── Status helpers ───────────────────────────────────────
-            function setStatus(state, text) {
-                $dot.className = "srf-statusbar-dot " + (state || "");
-                $statusText.textContent = text;
-            }
-
-            // ── Reference circle ─────────────────────────────────────
-            function drawRefCircle() {
-                if (refCircle) { refCircle.remove(); refCircle = null; }
-                refCircle = apiRef.canvas.circle({ lat: REF_LAT, lng: REF_LNG }, 12, 5)
-                    .change({ "fill": "#FF0000", "fill-opacity": 0.6, "stroke": "#CC0000", "stroke-width": 2 })
-                    .attach("over", function (coords) {
-                        apiRef.tooltip.showAt(coords, {
-                            main: "Referencia SRF",
-                            secondary: ["Lat: " + REF_LAT, "Lng: " + REF_LNG]
-                        }, 1);
-                    })
-                    .attach("out", function () { apiRef.tooltip.hide(); });
-            }
-
-            function removeRefCircle() {
-                if (refCircle) { refCircle.remove(); refCircle = null; }
-            }
-
-            drawRefCircle();
-
-            $refToggle.addEventListener("click", function () {
-                if (refVisible) {
-                    removeRefCircle();
-                    refVisible = false;
-                    $refToggle.textContent = "Mostrar";
-                } else {
-                    drawRefCircle();
-                    refVisible = true;
-                    $refToggle.textContent = "Ocultar";
-                }
-            });
-
-            // ── Device circles ───────────────────────────────────────
-            function clearDeviceCircles() {
-                Object.keys(deviceCircles).forEach(function (imei) {
-                    try { deviceCircles[imei].remove(); } catch (_) {}
-                });
-                deviceCircles = {};
-                activeImei = null;
-            }
-
-            function statusColor(status) {
-                if (status === "online")  return { fill: "#2E7D32", stroke: "#1B5E20" };
-                if (status === "offline") return { fill: "#B71C1C", stroke: "#7F0000" };
-                return { fill: "#E65100", stroke: "#BF360C" };
-            }
-
-            function drawDeviceCircles(devices) {
-                clearDeviceCircles();
-                devices.forEach(function (device) {
-                    var colors = statusColor(device.status);
-                    var circle = apiRef.canvas.circle(
-                        { lat: device.lat, lng: device.lon }, 8, 10
-                    )
-                    .change({
-                        "fill":         colors.fill,
-                        "fill-opacity": 0.85,
-                        "stroke":       colors.stroke,
-                        "stroke-width": 1.5
-                    })
-                    .attach("over", function (coords) {
-                        apiRef.tooltip.showAt(coords, {
-                            main: device.name,
-                            secondary: [
-                                "IMEI: "   + device.imei,
-                                "Estado: " + capitalizeFirst(device.status),
-                                device.deviceModel ? "Modelo: " + device.deviceModel : null,
-                                "Lat: "    + device.lat.toFixed(6),
-                                "Lng: "    + device.lon.toFixed(6)
-                            ].filter(Boolean)
-                        }, 1);
-                    })
-                    .attach("out", function () { apiRef.tooltip.hide(); })
-                    .attach("click", function () {
-                        highlightDevice(device.imei);
-                    });
-
-                    deviceCircles[device.imei] = circle;
-                });
-            }
-
-            function highlightDevice(imei) {
-                activeImei = imei;
-                // Highlight in list
-                $listEl.querySelectorAll(".srf-device-item").forEach(function (row) {
-                    row.classList.toggle("active", row.dataset.imei === imei);
-                });
-                // Scroll into view
-                var activeRow = $listEl.querySelector('[data-imei="' + imei + '"]');
-                if (activeRow) {
-                    activeRow.scrollIntoView({ block: "nearest" });
-                }
-            }
-
-            // ── Device list render ───────────────────────────────────
-            function renderDeviceList(devices) {
-                if (!devices || devices.length === 0) {
-                    $listEl.innerHTML =
-                        '<div class="srf-empty">' +
-                        '  <span class="srf-empty-icon">&#x1F4ED;</span>' +
-                        '  No se encontraron dispositivos con posición GPS' +
-                        '</div>';
-                    $count.style.display = "none";
-                    return;
-                }
-
-                $count.textContent = devices.length;
-                $count.style.display = "";
-
-                var rows = devices.map(function (d) {
-                    var dotClass = d.status === "online"  ? "online"
-                                : d.status === "offline" ? "offline" : "unknown";
-                    return [
-                        '<div class="srf-device-item" data-imei="' + escHtml(d.imei) + '">',
-                        '  <span class="srf-device-status-dot ' + dotClass + '"></span>',
-                        '  <div class="srf-device-info">',
-                        '    <div class="srf-device-name">' + escHtml(d.name) + '</div>',
-                        '    <div class="srf-device-meta">' + d.lat.toFixed(5) + ', ' + d.lon.toFixed(5) + '</div>',
-                        '  </div>',
-                        d.deviceModel ? '<span class="srf-device-model">' + escHtml(d.deviceModel) + '</span>' : '',
-                        '</div>'
-                    ].join("");
-                }).join("");
-
-                $listEl.innerHTML = rows;
-
-                // Attach click handlers for each row
-                $listEl.querySelectorAll(".srf-device-item").forEach(function (row) {
-                    row.addEventListener("click", function () {
-                        var imei = row.dataset.imei;
-                        highlightDevice(imei);
-                        // Pan map to device
-                        var device = deviceList.find(function (d) { return d.imei === imei; });
-                        if (device && apiRef.page && apiRef.page.go) {
-                            // Navigate map to device position if API supports it
-                        }
-                    });
-                });
-            }
+            var $loadBtn = elt.querySelector("#srf-load");
 
             // ── Load action ──────────────────────────────────────────
             $loadBtn.addEventListener("click", async function () {
+                console.log("[SRF] Load button clicked");
+
                 if (!window.srfToken) {
-                    setStatus("error", "Token no disponible");
+                    console.error("[SRF] Token not available");
                     return;
                 }
                 if (!window.srfSession.unionId) {
-                    setStatus("error", "No hay unión para esta base de datos");
+                    console.error("[SRF] No union ID for database:", window.srfSession.database);
                     return;
                 }
 
                 $loadBtn.disabled = true;
-                $clearBtn.disabled = true;
-                setStatus("loading", "Consultando Surfsight API...");
-                clearDeviceCircles();
-                $listEl.innerHTML = '<div class="srf-empty"><span class="srf-empty-icon">&#x23F3;</span>Cargando...</div>';
-                $count.style.display = "none";
 
                 try {
+                    console.log("[SRF] Fetching devices from Surfsight API for union:", window.srfSession.unionId);
                     var devices = await fetchSurfsightDevices(
                         window.srfSession.unionId,
                         window.srfToken
                     );
-                    deviceList = devices;
-                    drawDeviceCircles(devices);
-                    renderDeviceList(devices);
-
-                    var onlineCount  = devices.filter(function (d) { return d.status === "online";  }).length;
-                    var offlineCount = devices.filter(function (d) { return d.status === "offline"; }).length;
-
-                    setStatus("ok",
-                        devices.length + " dispositivo" + (devices.length !== 1 ? "s" : "") +
-                        " — " + onlineCount + " online, " + offlineCount + " offline"
-                    );
+                    console.log("[SRF] Devices fetched:", devices);
                 } catch (err) {
                     console.error("[SRF] Surfsight error:", err);
-                    setStatus("error", "Error: " + err.message.substring(0, 80));
-                    $listEl.innerHTML =
-                        '<div class="srf-empty">' +
-                        '  <span class="srf-empty-icon">&#x26A0;&#xFE0F;</span>' +
-                        '  ' + escHtml(err.message.substring(0, 120)) +
-                        '</div>';
                 } finally {
                     $loadBtn.disabled = false;
-                    $clearBtn.disabled = false;
                 }
-            });
-
-            // ── Clear action ─────────────────────────────────────────
-            $clearBtn.addEventListener("click", function () {
-                clearDeviceCircles();
-                deviceList = [];
-                $listEl.innerHTML =
-                    '<div class="srf-empty">' +
-                    '  <span class="srf-empty-icon">&#x1F4CD;</span>' +
-                    '  Presioná "Cargar dispositivos"' +
-                    '</div>';
-                $count.style.display = "none";
-                setStatus("", "Listo");
             });
         }
 
