@@ -8,65 +8,30 @@
     <script>
         console.log("[SRF] Script loading...");
 
-        var SRFApi = (function () {
-            var _api = null;
-
-            return {
-                init: function (api) {
-                    _api = api;
-                    
-                },
-
-                getSession: function (callback) {
-                    if (!_api) {
-                        console.error("[SRF] API not initialized");
-                        return;
-                    }
-                    _api.getSession(callback);
-                },
-
-                call: function (method, params, success, error) {
-                    if (!_api) {
-                        console.error("[SRF] API not initialized");
-                        return;
-                    }
-                    _api.call(method, params, success, error);
-                }
-            };
-        })();
-        api.getSession(function (session) {
-        console.log(session.database);
-        });
         geotab.addin.srfPositions = function (api, state) {
-            console.log("[SRF] Module loaded");
+            console.log("[SRF] Outer function called, api type:", typeof api);
 
             return {
                 initialize: function (freshApi, freshState, callback) {
                     console.log("[SRF] initialize() called");
-                    try {
-                        SRFApi.init(freshApi);
+                    console.log("[SRF] freshApi type:", typeof freshApi);
+                    console.log("[SRF] freshState type:", typeof freshState);
 
-                        SRFApi.getSession(function (session) {
-                            console.log("[SRF] === SESSION DATA ===");
-                            console.log("[SRF] Database:", session.database);
-                            console.log("[SRF] User:", session.userName);
-                            console.log("[SRF] SessionId:", session.sessionId);
-                            callback();
-                        });
-                    } catch (err) {
-                        console.error("[SRF] ERROR in initialize:", err);
+                    freshApi.getSession(function (session) {
+                        console.log("[SRF] === SESSION DATA ===");
+                        console.log("[SRF] Database:", session.database);
+                        console.log("[SRF] User:", session.userName);
+                        console.log("[SRF] SessionId:", session.sessionId);
                         callback();
-                    }
+                    });
                 },
 
-                focus: function (freshApi, freshState, callback) {
+                focus: function () {
                     console.log("[SRF] focus() called");
-                    callback();
                 },
 
-                blur: function (freshApi, freshState, callback) {
+                blur: function () {
                     console.log("[SRF] blur() called");
-                    callback();
                 }
             };
         };
