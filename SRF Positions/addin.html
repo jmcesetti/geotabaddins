@@ -178,99 +178,112 @@
             });
         }
 
-        geotab.addin.srfPositions = function (elt, api) {
-            elt.innerHTML = [
-                '<div class="srf-panel">',
-                '  <h3 class="srf-title">SRF Positions</h3>',
-                '  <div id="srf-status" class="srf-status">Inicializando...</div>',
-                '  <div class="srf-actions">',
-                '    <button id="srf-load" class="srf-btn srf-btn--primary">Cargar dispositivos</button>',
-                '  </div>',
-                '</div>'
-            ].join('');
+        // Entry point: return { initialize, focus, blur }
+        geotab.addin.srfPositions = function (api_, state_) {
+            var api = api_;
+            return {
+                initialize: function (freshApi, freshState, callback) {
+                    api = freshApi;
 
-            var $status = elt.querySelector("#srf-status");
-            var $loadBtn = elt.querySelector("#srf-load");
+                    var elt = document.getElementById('addin-root');
+                    elt.innerHTML = [
+                        '<div class="srf-panel">',
+                        '  <h3 class="srf-title">SRF Positions</h3>',
+                        '  <div id="srf-status" class="srf-status">Inicializando...</div>',
+                        '  <div class="srf-actions">',
+                        '    <button id="srf-load" class="srf-btn srf-btn--primary">Cargar dispositivos</button>',
+                        '  </div>',
+                        '</div>'
+                    ].join('');
 
-            function setStatus(text) {
-                $status.textContent = text;
-            }
+                    var $status = elt.querySelector("#srf-status");
+                    var $loadBtn = elt.querySelector("#srf-load");
 
-            // Load token and unions on init
-            Promise.all([loadToken(), loadUnionsData()]).then(function (results) {
-                if (!results[0] || !results[1]) {
-                    setStatus("Error al cargar datos iniciales");
-                    return;
-                }
-                setStatus("Listo");
-                $loadBtn.disabled = false;
-            });
-
-            $loadBtn.addEventListener("click", async function () {
-                console.log("[SRF] Load button clicked");
-
-                if (!window.srfToken) {
-                    setStatus("Error: Token no disponible");
-                    console.error("[SRF] Token not available");
-                    return;
-                }
-
-                api.getSession(function (session) {
-                    var database = session.database || "";
-                    console.log("[SRF] Database:", database);
-
-                    var union = getUnionByDatabase(database);
-                    if (!union) {
-                        setStatus("Error: No hay unión para esta base de datos");
-                        console.error("[SRF] No union for database:", database);
-                        return;
+                    function setStatus(text) {
+                        $status.textContent = text;
                     }
 
-                    var unionName = union.name;
-                    console.log("[SRF] Union name:", unionName);
+                    // Load token and unions
+                    Promise.all([loadToken(), loadUnionsData()]).then(function (results) {
+                        if (!results[0] || !results[1]) {
+                            setStatus("Error al cargar datos iniciales");
+                            callback();
+                            return;
+                        }
 
-                    $loadBtn.disabled = true;
-                    setStatus("Consultando Surfsight API...");
+                        // Get session
+                        api.getSession(function (session) {
+                            var database = session.database || "";
+                            console.log("[SRF] Database from session:", database);
 
-                    fetchSurfsightOrganizations(window.srfToken)
-                        .then(function (orgs) {
-                            console.log("[SRF] Organizations fetched:", orgs);
-
-                            var matchedOrg = null;
-                            for (var i = 0; i < orgs.length; i++) {
-                                if (orgs[i].name.toLowerCase() === unionName.toLowerCase()) {
-                                    matchedOrg = orgs[i];
-                                    break;
-                                }
-                            }
-
-                            if (!matchedOrg) {
-                                setStatus("Error: No se encontró organización en Surfsight");
-                                console.error("[SRF] No matching org for:", unionName);
-                                $loadBtn.disabled = false;
+                            var union = getUnionByDatabase(database);
+                            if (!union) {
+                                setStatus("Sin unión para esta base de datos");
+                                console.warn("[SRF] No union for database:", database);
+                                callback();
                                 return;
                             }
 
-                            console.log("[SRF] Matched org:", matchedOrg);
-                            return fetchSurfsightDevices(matchedOrg.id, window.srfToken);
-                        })
-                        .then(function (devices) {
-                            if (devices) {
-                                console.log("[SRF] Devices fetched:", devices);
-                                setStatus("Se cargaron " + devices.length + " dispositivos (ver consola)");
-                            }
+                            console.log("[SRF] Union found:", union);
+                            setStatus("Listo");
                             $loadBtn.disabled = false;
-                        })
-                        .catch(function (err) {
-                            console.error("[SRF] Surfsight error:", err);
-                            setStatus("Error: " + err.message.substring(0, 50));
-                            $loadBtn.disabled = false;
-                        });
-                });
-            });
 
-            setStatus("Cargando datos...");
-            $loadBtn.disabled = true;
+                            $loadBtn.addEventListener("click", async function () {
+                                console.log("[SRF] Load button clicked");
+
+                                if (!window.srfToken) {
+                                    setStatus("Error: Token no disponible");
+                                    console.error("[SRF] Token not available");
+                                    return;
+                                }
+
+                                var unionName = union.name;
+                                console.log("[SRF] Union name:", unionName);
+
+                                $loadBtn.disabled = true;
+                                setStatus("Consultando Surfsight API...");
+
+                                try {
+                                    var orgs = await fetchSurfsightOrganizations(window.srfToken);
+                                    console.log("[SRF] Organizations fetched:", orgs);
+
+                                    var matchedOrg = null;
+                                    for (var i = 0; i < orgs.length; i++) {
+                                        if (orgs[i].name.toLowerCase() === unionName.toLowerCase()) {
+                                            matchedOrg = orgs[i];
+                                            break;
+                                        }
+                                    }
+
+                                    if (!matchedOrg) {
+                                        setStatus("Error: No se encontró organización en Surfsight");
+                                        console.error("[SRF] No matching org for:", unionName);
+                                        $loadBtn.disabled = false;
+                                        return;
+                                    }
+
+                                    console.log("[SRF] Matched org:", matchedOrg);
+
+                                    var devices = await fetchSurfsightDevices(matchedOrg.id, window.srfToken);
+                                    console.log("[SRF] Devices fetched:", devices);
+                                    setStatus("Se cargaron " + devices.length + " dispositivos (ver consola)");
+                                    $loadBtn.disabled = false;
+                                } catch (err) {
+                                    console.error("[SRF] Error:", err);
+                                    setStatus("Error: " + err.message.substring(0, 50));
+                                    $loadBtn.disabled = false;
+                                }
+                            });
+
+                            callback();
+                        });
+                    });
+                },
+                focus: function (freshApi) {
+                    api = freshApi;
+                },
+                blur: function () {}
+            };
         };
     </script>
 </body>
