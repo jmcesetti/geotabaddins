@@ -8,31 +8,185 @@
     <script>
         console.log("[SRF] Script loading...");
 
-        geotab.addin.srfPositions = function (elt, service) {
-            console.log("[SRF] geotab.addin.srfPositions called");
-            console.log("[SRF] elt:", elt);
-            console.log("[SRF] service:", service);
+        var TOKEN_URL = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt";
+        var UNIONS_CSV_URL = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/unions.csv";
+        var SURFSIGHT_API_BASE = "https://api-prod.surfsight.net/v2";
 
+        var unionData = null;
+
+        async function loadToken() {
             try {
-                var circle = service.canvas.circle(
-                    { lat: -38.2112142, lng: -69.2293903 },
-                    12,
-                    5
-                )
-                .change({
-                    "fill": "#FF0000",
-                    "fill-opacity": 0.7,
-                    "stroke": "#CC0000",
-                    "stroke-width": 2
-                });
-
-                console.log("[SRF] Circle drawn successfully");
+                var res = await fetch(TOKEN_URL);
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                window.srfToken = (await res.text()).trim();
+                console.log("[SRF] Token loaded");
+                return true;
             } catch (err) {
-                console.error("[SRF] Error drawing circle:", err);
+                console.error("[SRF] Failed to load token:", err.message);
+                return false;
             }
+        }
+
+        async function loadUnionsData() {
+            try {
+                var res = await fetch(UNIONS_CSV_URL);
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                var csv = await res.text();
+                var lines = csv.trim().split("\n");
+                var headers = lines[0].split(",");
+                unionData = {};
+                for (var i = 1; i < lines.length; i++) {
+                    var values = lines[i].split(",");
+                    var record = {};
+                    headers.forEach(function (h, idx) {
+                        record[h.trim()] = (values[idx] || "").trim();
+                    });
+                    if (record.geotabdb) {
+                        unionData[record.geotabdb.toLowerCase()] = record;
+                    }
+                }
+                console.log("[SRF] Unions loaded:", unionData);
+                return true;
+            } catch (err) {
+                console.error("[SRF] Failed to load unions:", err.message);
+                return false;
+            }
+        }
+
+        function getUnionByDatabase(database) {
+            if (!unionData || !database) return null;
+            return unionData[database.toLowerCase()] || null;
+        }
+
+        async function fetchSurfsightOrganizations(token) {
+            var url = SURFSIGHT_API_BASE + "/organizations";
+            var res = await fetch(url, {
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "Accept": "application/json"
+                }
+            });
+
+            if (!res.ok) {
+                var body = "";
+                try { body = await res.text(); } catch (_) {}
+                throw new Error("Surfsight API (organizations) " + res.status);
+            }
+
+            var json = await res.json();
+            return json.data || [];
+        }
+
+        async function fetchSurfsightDevices(orgId, token) {
+            var url = SURFSIGHT_API_BASE + "/organizations/" + encodeURIComponent(orgId) + "/devices";
+            var res = await fetch(url, {
+                headers: {
+                    "Authorization": "Bearer " + token,
+                    "Accept": "application/json"
+                }
+            });
+
+            if (!res.ok) {
+                var body = "";
+                try { body = await res.text(); } catch (_) {}
+                throw new Error("Surfsight API (devices) " + res.status);
+            }
+
+            var json = await res.json();
+            var raw = json.data || [];
+
+            return raw.map(function (d) {
+                return {
+                    imei:        d.imei        || d.deviceId   || d.id   || "",
+                    name:        d.name        || d.deviceName || d.imei || "Sin nombre",
+                    lat:         parseFloat(d.lat  || d.latitude  || d.gps && d.gps.lat  || 0),
+                    lon:         parseFloat(d.lon  || d.longitude || d.gps && d.gps.lon  || 0),
+                    status:     (d.status      || d.deviceStatus || "unknown").toLowerCase(),
+                    deviceModel: d.deviceModel || d.model || d.type || ""
+                };
+            }).filter(function (d) {
+                return !(d.lat === 0 && d.lon === 0);
+            });
+        }
+
+        geotab.addin.srfPositions = function (api, state) {
+            console.log("[SRF] geotab.addin.srfPositions called");
+            console.log("[SRF] api:", api);
+            console.log("[SRF] state.map:", state.map);
+
+            return {
+                initialize: function (freshApi, freshState, callback) {
+                    console.log("[SRF] initialize() called");
+                    api = freshApi;
+
+                    Promise.all([loadToken(), loadUnionsData()]).then(function (results) {
+                        console.log("[SRF] Token/Unions load results:", results);
+
+                        api.getSession(function (session) {
+                            console.log("[SRF] Session:", session);
+                            console.log("[SRF] Database:", session.database);
+                            console.log("[SRF] User:", session.userName);
+
+                            var database = session.database || "";
+                            var union = getUnionByDatabase(database);
+
+                            if (!union) {
+                                console.warn("[SRF] No union for database:", database);
+                                console.warn("[SRF] Available unions:", Object.keys(unionData));
+                                callback();
+                                return;
+                            }
+
+                            console.log("[SRF] Union found:", union);
+
+                            // Fetch organizations and devices
+                            fetchSurfsightOrganizations(window.srfToken)
+                                .then(function (orgs) {
+                                    console.log("[SRF] Organizations fetched:", orgs);
+
+                                    var matchedOrg = null;
+                                    for (var i = 0; i < orgs.length; i++) {
+                                        if (orgs[i].name.toLowerCase() === union.name.toLowerCase()) {
+                                            matchedOrg = orgs[i];
+                                            break;
+                                        }
+                                    }
+
+                                    if (!matchedOrg) {
+                                        console.error("[SRF] No matching org for:", union.name);
+                                        callback();
+                                        return;
+                                    }
+
+                                    console.log("[SRF] Matched org:", matchedOrg);
+                                    return fetchSurfsightDevices(matchedOrg.id, window.srfToken);
+                                })
+                                .then(function (devices) {
+                                    if (devices) {
+                                        console.log("[SRF] Devices fetched:", devices);
+                                    }
+                                    callback();
+                                })
+                                .catch(function (err) {
+                                    console.error("[SRF] Error:", err);
+                                    callback();
+                                });
+                        });
+                    });
+                },
+
+                focus: function (freshApi) {
+                    console.log("[SRF] focus() called");
+                    api = freshApi;
+                },
+
+                blur: function () {
+                    console.log("[SRF] blur() called");
+                }
+            };
         };
 
-        console.log("[SRF] Script loaded, geotab.addin.srfPositions defined");
+        console.log("[SRF] Script loaded");
     </script>
 </body>
 </html>
