@@ -3,19 +3,78 @@
 <head>
     <meta charset="utf-8">
     <title>SRF Positions Map Add-in</title>
-    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
-    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
     <style>
-        body { margin: 0; padding: 0; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        .info { position: absolute; top: 10px; left: 10px; background: white; padding: 10px; border-radius: 4px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 13px;
+            color: #333;
+            background: #f5f5f5;
+        }
+
+        .srf-panel {
+            padding: 16px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .srf-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #1976d2;
+        }
+
+        .srf-devices-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .srf-device-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .srf-device-item:hover {
+            background: #f5f5f5;
+        }
+
+        .srf-device-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .srf-device-speed {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .srf-status {
+            padding: 8px;
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-radius: 4px;
+            font-size: 12px;
+            text-align: center;
+            margin-top: 12px;
+        }
+
+        .srf-error {
+            background: #ffebee !important;
+            color: #c62828 !important;
+        }
     </style>
 </head>
 <body>
-    <div id="map"></div>
-    <div class="info">
-        <p>Loading devices...</p>
-    </div>
+    <div id="addin-root"></div>
 
     <script>
         console.log("[SRF] Script loading...");
@@ -40,18 +99,21 @@
             async function getDevices() {
                 if (!token) await fetchTokenFromGitHub();
                 try {
-                    const response = await fetch('https://api.surfsight.com/devices', {
+                    const orgId = 59257;
+                    const url = `https://api-prod.surfsight.net/v2/organizations/${orgId}/devices`;
+                    console.log("[SRF] Fetching from:", url);
+
+                    const response = await fetch(url, {
                         headers: {
                             'Authorization': `Bearer ${token}`,
                             'Content-Type': 'application/json'
                         }
                     });
-                    if (!response.ok) throw new Error(`Failed to fetch devices: ${response.statusText}`);
+                    if (!response.ok) throw new Error(`Failed to fetch devices: ${response.status} ${response.statusText}`);
                     const devicesData = await response.json();
 
-                    // Convertir objeto en array si es necesario
                     const devices = Array.isArray(devicesData) ? devicesData : Object.values(devicesData);
-                    console.log("[SRF] Devices fetched:", devices);
+                    console.log("[SRF] Devices fetched:", devices.length, "devices");
                     return devices;
                 } catch (err) {
                     console.error("[SRF] ERROR fetching devices:", err);
@@ -64,102 +126,87 @@
             };
         })();
 
-        geotab.addin.srfPositions = function (api_, state_) {
-            console.log("[SRF] Module registered");
-            let map = null;
+        geotab.addin.srfPositions = function (elt, service) {
+            console.log("[SRF] Module registered with elt and service");
+            let circles = [];
 
-            return {
-                initialize: function (freshApi, freshState, callback) {
-                    console.log("[SRF] initialize() called");
+            function drawDevices(devices) {
+                clearDevices();
 
-                    mapboxgl.accessToken = 'YOUR_MAPBOX_TOKEN';
-                    map = new mapboxgl.Map({
-                        container: 'map',
-                        style: 'mapbox://styles/mapbox/streets-v12',
-                        center: [-74.5, 40],
-                        zoom: 10
-                    });
-
-                    map.on('load', async () => {
-                        try {
-                            const devices = await SurfSightAPI.getDevices();
-                            addDevicesToMap(devices);
-                        } catch (err) {
-                            console.error("[SRF] ERROR initializing map:", err);
-                        }
-                        callback();
-                    });
-                },
-
-                focus: function (freshApi) {
-                    console.log("[SRF] focus() called");
-                    if (map) map.resize();
-                },
-
-                blur: function () {
-                    console.log("[SRF] blur() called");
-                }
-            };
-
-            function addDevicesToMap(devices) {
                 if (!Array.isArray(devices) || devices.length === 0) {
                     console.log("[SRF] No devices to display");
                     return;
                 }
 
-                const geojson = {
-                    type: 'FeatureCollection',
-                    features: devices.map(device => ({
-                        type: 'Feature',
-                        geometry: {
-                            type: 'Point',
-                            coordinates: [device.lon, device.lat]
-                        },
-                        properties: {
-                            name: device.name,
-                            imei: device.imei,
-                            status: device.status,
-                            speed: device.speed,
-                            deviceModel: device.deviceModel,
-                            lastSeen: device.lastSeenOnline
-                        }
-                    }))
-                };
-
-                map.addSource('devices', { type: 'geojson', data: geojson });
-                map.addLayer({
-                    id: 'devices-layer',
-                    type: 'circle',
-                    source: 'devices',
-                    paint: {
-                        'circle-radius': 8,
-                        'circle-color': [
-                            'match',
-                            ['get', 'status'],
-                            'online', '#00cc00',
-                            'offline', '#ff3333',
-                            '#999999'
-                        ],
-                        'circle-stroke-width': 2,
-                        'circle-stroke-color': '#ffffff'
+                devices.forEach(device => {
+                    if (!device.lat || !device.lon) {
+                        console.warn("[SRF] Device without coordinates:", device.name);
+                        return;
                     }
+
+                    const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
+                        .change({
+                            "fill": device.status === 'online' ? "#00cc00" : "#ff3333",
+                            "fill-opacity": 0.7,
+                            "stroke": device.status === 'online' ? "#009900" : "#cc0000",
+                            "stroke-width": 2
+                        })
+                        .attach("over", function (coords) {
+                            service.tooltip.showAt(
+                                coords,
+                                {
+                                    main: device.name,
+                                    secondary: [
+                                        "Speed: " + (device.speed || 'N/A') + " km/h",
+                                        "Status: " + device.status,
+                                        "Lat: " + device.lat.toFixed(4),
+                                        "Lng: " + device.lon.toFixed(4)
+                                    ]
+                                },
+                                1
+                            );
+                        })
+                        .attach("out", function () {
+                            service.tooltip.hide();
+                        });
+
+                    circles.push(circle);
                 });
 
-                map.on('click', 'devices-layer', (e) => {
-                    const props = e.features[0].properties;
-                    new mapboxgl.Popup()
-                        .setLngLat(e.lngLat)
-                        .setHTML(`
-                            <strong>${props.name}</strong><br>
-                            Status: <span style="color: ${props.status === 'online' ? '#00cc00' : '#ff3333'}">${props.status}</span><br>
-                            IMEI: ${props.imei}<br>
-                            Model: ${props.deviceModel}<br>
-                            Speed: ${props.speed || 'N/A'} km/h<br>
-                            Last Seen: ${new Date(props.lastSeen).toLocaleString()}
-                        `)
-                        .addTo(map);
-                });
+                console.log("[SRF] Drawn", circles.length, "device circles");
             }
+
+            function clearDevices() {
+                circles.forEach(circle => circle.remove());
+                circles = [];
+            }
+
+            async function loadAndDisplay() {
+                const statusEl = elt.querySelector("#srf-status");
+                try {
+                    console.log("[SRF] Starting loadAndDisplay");
+                    statusEl.textContent = "Cargando dispositivos...";
+                    const devices = await SurfSightAPI.getDevices();
+                    console.log("[SRF] Got devices:", devices.length);
+                    drawDevices(devices);
+                    statusEl.textContent = `✓ ${devices.length} dispositivos cargados`;
+                } catch (err) {
+                    console.error("[SRF] ERROR:", err);
+                    statusEl.textContent = `✗ Error: ${err.message}`;
+                    statusEl.classList.add("srf-error");
+                }
+            }
+
+            elt.innerHTML = [
+                '<div class="srf-panel">',
+                '  <h3 class="srf-title">SRF Positions</h3>',
+                '  <div id="srf-devices" class="srf-devices-list"></div>',
+                '  <div id="srf-status" class="srf-status">Inicializando...</div>',
+                '</div>'
+            ].join('');
+
+            console.log("[SRF] About to call loadAndDisplay");
+            loadAndDisplay();
         };
 
         console.log("[SRF] Script loaded successfully");
