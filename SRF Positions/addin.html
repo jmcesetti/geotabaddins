@@ -8,52 +8,70 @@
     <script>
         console.log("[SRF] Script loading...");
 
-        // Esperar a que geotab esté disponible
-        if (typeof geotab !== 'undefined') {
-            console.log("[SRF] geotab is available");
-            registerAddin();
-        } else {
-            console.log("[SRF] Waiting for geotab...");
-            document.addEventListener('DOMContentLoaded', function () {
-                if (typeof geotab !== 'undefined') {
-                    registerAddin();
-                } else {
-                    console.error("[SRF] geotab is still not available");
-                }
-            });
-        }
+        const SRFApi = (() => {
+            let _api = null;
 
-        function registerAddin() {
-            geotab.addin.srfPositions = function (api, state) {
-                console.log("[SRF] Outer function called, api type:", typeof api);
+            function call(method, params) {
+                return new Promise((resolve, reject) => {
+                    _api.call(method, params,
+                        result => resolve(result),
+                        err => reject(err)
+                    );
+                });
+            }
 
-                return {
-                    initialize: function (freshApi, freshState, callback) {
-                        console.log("[SRF] initialize() called");
-                        console.log("[SRF] freshApi type:", typeof freshApi);
-                        console.log("[SRF] freshState type:", typeof freshState);
+            async function getSession() {
+                return new Promise((resolve, reject) => {
+                    _api.getSession(
+                        session => resolve(session),
+                        err => reject(err)
+                    );
+                });
+            }
 
-                        freshApi.getSession(function (session) {
+            return {
+                init: function (api) {
+                    _api = api;
+                    console.log("[SRF] API initialized");
+                },
+                call,
+                getSession
+            };
+        })();
+
+        geotab.addin.srfPositions = function (api_, state_) {
+            console.log("[SRF] Module registered");
+
+            return {
+                initialize: function (freshApi, freshState, callback) {
+                    console.log("[SRF] initialize() called");
+
+                    SRFApi.init(freshApi);
+
+                    SRFApi.getSession()
+                        .then(session => {
                             console.log("[SRF] === SESSION DATA ===");
                             console.log("[SRF] Database:", session.database);
                             console.log("[SRF] User:", session.userName);
                             console.log("[SRF] SessionId:", session.sessionId);
                             callback();
+                        })
+                        .catch(err => {
+                            console.error("[SRF] ERROR getting session:", err);
+                            callback();
                         });
-                    },
+                },
 
-                    focus: function () {
-                        console.log("[SRF] focus() called");
-                    },
+                focus: function (freshApi) {
+                    console.log("[SRF] focus() called");
+                    SRFApi.init(freshApi);
+                },
 
-                    blur: function () {
-                        console.log("[SRF] blur() called");
-                    }
-                };
+                blur: function () {
+                    console.log("[SRF] blur() called");
+                }
             };
-
-            console.log("[SRF] Add-in registered successfully");
-        }
+        };
 
         console.log("[SRF] Script loaded successfully");
     </script>
