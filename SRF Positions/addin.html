@@ -10,19 +10,58 @@
     <script>
         console.log("[SRF] Script loading...");
 
-        // ─── Geotab Add-In entry point ─────────────────────────────────────────────
-        geotab.addin.srfPositions = function (api, state) {
+        geotab.addin.srfPositions = function (api_, state_) {
+            console.log("[SRF] geotab.addin.srfPositions called");
+            var api = api_;
             return {
-                initialize: function (api, state, callback) {
-                    window.geotabApi = api;
-                    window.geotabMap = state.map;
-                    console.log("SRF Positions initialized");
-                        }
-                    }
-                    callback();
-            };
+                initialize: function (freshApi, freshState, callback) {
+                    try {
+                        console.log("[SRF] initialize() called");
+                        api = freshApi;
 
-        console.log("[SRF] Script loaded");
+                        if (!api || typeof api.getSession !== 'function') {
+                            console.error("[SRF] ERROR: api or api.getSession is not available");
+                            callback();
+                            return;
+                        }
+
+                        api.getSession(function (session) {
+                            try {
+                                console.log("[SRF] === SESSION DATA ===");
+                                console.log("[SRF] Database:", session.database);
+                                console.log("[SRF] User:", session.userName);
+                                console.log("[SRF] SessionId:", session.sessionId);
+                                console.log("[SRF] Full session:", session);
+                            } catch (err) {
+                                console.error("[SRF] ERROR logging session:", err);
+                            } finally {
+                                callback();
+                            }
+                        });
+                    } catch (err) {
+                        console.error("[SRF] ERROR in initialize:", err);
+                        callback();
+                    }
+                },
+                focus: function (freshApi) {
+                    try {
+                        console.log("[SRF] focus() called");
+                        api = freshApi;
+                    } catch (err) {
+                        console.error("[SRF] ERROR in focus:", err);
+                    }
+                },
+                blur: function () {
+                    try {
+                        console.log("[SRF] blur() called");
+                    } catch (err) {
+                        console.error("[SRF] ERROR in blur:", err);
+                    }
+                }
+            };
+        };
+
+        console.log("[SRF] Script loaded successfully");
     </script>
 </body>
 </html>
