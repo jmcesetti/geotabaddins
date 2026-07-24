@@ -3,74 +3,163 @@
 <head>
     <meta charset="utf-8">
     <title>SRF Positions Map Add-in</title>
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        .info { position: absolute; top: 10px; left: 10px; background: white; padding: 10px; border-radius: 4px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    </style>
 </head>
 <body>
+    <div id="map"></div>
+    <div class="info">
+        <p>Loading devices...</p>
+    </div>
+
     <script>
         console.log("[SRF] Script loading...");
 
-        const SRFApi = (() => {
-            let _api = null;
+        const SurfSightAPI = (() => {
+            let token = null;
 
-            function call(method, params) {
-                return new Promise((resolve, reject) => {
-                    _api.call(method, params,
-                        result => resolve(result),
-                        err => reject(err)
-                    );
-                });
+            async function fetchTokenFromGitHub() {
+                try {
+                    const response = await fetch('https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt');
+                    if (!response.ok) throw new Error(`Failed to fetch token: ${response.statusText}`);
+                    token = await response.text();
+                    token = token.trim();
+                    console.log("[SRF] Token loaded from GitHub");
+                    return token;
+                } catch (err) {
+                    console.error("[SRF] ERROR fetching token:", err);
+                    throw err;
+                }
             }
 
-            async function getSession() {
-                return new Promise((resolve, reject) => {
-                    _api.getSession(
-                        session => resolve(session),
-                        err => reject(err)
-                    );
-                });
+            async function getDevices() {
+                if (!token) await fetchTokenFromGitHub();
+                try {
+                    const response = await fetch('https://api.surfsight.com/devices', {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    if (!response.ok) throw new Error(`Failed to fetch devices: ${response.statusText}`);
+                    const devicesData = await response.json();
+
+                    // Convertir objeto en array si es necesario
+                    const devices = Array.isArray(devicesData) ? devicesData : Object.values(devicesData);
+                    console.log("[SRF] Devices fetched:", devices);
+                    return devices;
+                } catch (err) {
+                    console.error("[SRF] ERROR fetching devices:", err);
+                    throw err;
+                }
             }
 
             return {
-                init: function (api) {
-                    _api = api;
-                    console.log("[SRF] API initialized");
-                },
-                call,
-                getSession
+                getDevices
             };
         })();
 
         geotab.addin.srfPositions = function (api_, state_) {
             console.log("[SRF] Module registered");
+            let map = null;
 
             return {
                 initialize: function (freshApi, freshState, callback) {
                     console.log("[SRF] initialize() called");
 
-                    SRFApi.init(freshApi);
+                    mapboxgl.accessToken = 'YOUR_MAPBOX_TOKEN';
+                    map = new mapboxgl.Map({
+                        container: 'map',
+                        style: 'mapbox://styles/mapbox/streets-v12',
+                        center: [-74.5, 40],
+                        zoom: 10
+                    });
 
-                    SRFApi.getSession()
-                        .then(session => {
-                            console.log("[SRF] === SESSION DATA ===");
-                            console.log("[SRF] Database:", session.database);
-                            console.log("[SRF] User:", session.userName);
-                            console.log("[SRF] SessionId:", session.sessionId);
-                            callback();
-                        })
-                        .catch(err => {
-                            console.error("[SRF] ERROR getting session:", err);
-                            callback();
-                        });
+                    map.on('load', async () => {
+                        try {
+                            const devices = await SurfSightAPI.getDevices();
+                            addDevicesToMap(devices);
+                        } catch (err) {
+                            console.error("[SRF] ERROR initializing map:", err);
+                        }
+                        callback();
+                    });
                 },
 
                 focus: function (freshApi) {
                     console.log("[SRF] focus() called");
-                    SRFApi.init(freshApi);
+                    if (map) map.resize();
                 },
 
                 blur: function () {
                     console.log("[SRF] blur() called");
                 }
             };
+
+            function addDevicesToMap(devices) {
+                if (!Array.isArray(devices) || devices.length === 0) {
+                    console.log("[SRF] No devices to display");
+                    return;
+                }
+
+                const geojson = {
+                    type: 'FeatureCollection',
+                    features: devices.map(device => ({
+                        type: 'Feature',
+                        geometry: {
+                            type: 'Point',
+                            coordinates: [device.lon, device.lat]
+                        },
+                        properties: {
+                            name: device.name,
+                            imei: device.imei,
+                            status: device.status,
+                            speed: device.speed,
+                            deviceModel: device.deviceModel,
+                            lastSeen: device.lastSeenOnline
+                        }
+                    }))
+                };
+
+                map.addSource('devices', { type: 'geojson', data: geojson });
+                map.addLayer({
+                    id: 'devices-layer',
+                    type: 'circle',
+                    source: 'devices',
+                    paint: {
+                        'circle-radius': 8,
+                        'circle-color': [
+                            'match',
+                            ['get', 'status'],
+                            'online', '#00cc00',
+                            'offline', '#ff3333',
+                            '#999999'
+                        ],
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': '#ffffff'
+                    }
+                });
+
+                map.on('click', 'devices-layer', (e) => {
+                    const props = e.features[0].properties;
+                    new mapboxgl.Popup()
+                        .setLngLat(e.lngLat)
+                        .setHTML(`
+                            <strong>${props.name}</strong><br>
+                            Status: <span style="color: ${props.status === 'online' ? '#00cc00' : '#ff3333'}">${props.status}</span><br>
+                            IMEI: ${props.imei}<br>
+                            Model: ${props.deviceModel}<br>
+                            Speed: ${props.speed || 'N/A'} km/h<br>
+                            Last Seen: ${new Date(props.lastSeen).toLocaleString()}
+                        `)
+                        .addTo(map);
+                });
+            }
         };
 
         console.log("[SRF] Script loaded successfully");
