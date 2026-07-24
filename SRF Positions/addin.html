@@ -8,81 +8,30 @@
     <script>
         console.log("[SRF] Script loading...");
 
-        geotab.addin.srfPositions = function (api, state) {
-            console.log("[SRF] geotab.addin.srfPositions called");
-            console.log("[SRF] Returning object with initialize, focus, blur");
-
-            var obj = {
+        geotab.addin.srfPositions = function (api_, state_) {
+            console.log("[SRF] geotab.addin.srfPositions called, api_:", typeof api_);
+            var api = api_;
+            return {
                 initialize: function (freshApi, freshState, callback) {
                     console.log("[SRF] initialize() called");
                     api = freshApi;
 
-                    // Load token
-                    fetch("https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt")
-                        .then(function (res) { return res.text(); })
-                        .then(function (token) {
-                            console.log("[SRF] Token loaded");
-                            window.srfToken = token.trim();
-
-                            // Load unions CSV
-                            return fetch("https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/unions.csv")
-                                .then(function (res) { return res.text(); });
-                        })
-                        .then(function (csv) {
-                            console.log("[SRF] Unions CSV loaded");
-                            var lines = csv.trim().split("\n");
-                            var headers = lines[0].split(",");
-                            var unionData = {};
-                            for (var i = 1; i < lines.length; i++) {
-                                var values = lines[i].split(",");
-                                var record = {};
-                                headers.forEach(function (h, idx) {
-                                    record[h.trim()] = (values[idx] || "").trim();
-                                });
-                                if (record.geotabdb) {
-                                    unionData[record.geotabdb.toLowerCase()] = record;
-                                }
-                            }
-                            window.srfUnions = unionData;
-                            console.log("[SRF] Unions data:", Object.keys(unionData));
-
-                            // Get session
-                            api.getSession(function (session) {
-                                console.log("[SRF] Session received");
-                                console.log("[SRF] Database:", session.database);
-                                console.log("[SRF] User:", session.userName);
-                                console.log("[SRF] SessionId:", session.sessionId);
-
-                                var database = (session.database || "").toLowerCase();
-                                var union = unionData[database];
-                                if (union) {
-                                    console.log("[SRF] Union matched:", union);
-                                } else {
-                                    console.warn("[SRF] No union found for database:", session.database);
-                                    console.warn("[SRF] Available databases:", Object.keys(unionData));
-                                }
-
-                                callback();
-                            });
-                        })
-                        .catch(function (err) {
-                            console.error("[SRF] Error:", err);
-                            callback();
-                        });
+                    api.getSession(function (session) {
+                        console.log("[SRF] Session received:");
+                        console.log("[SRF] - Database:", session.database);
+                        console.log("[SRF] - User:", session.userName);
+                        console.log("[SRF] - SessionId:", session.sessionId);
+                        callback();
+                    });
                 },
-
                 focus: function (freshApi) {
                     console.log("[SRF] focus() called");
                     api = freshApi;
                 },
-
                 blur: function () {
                     console.log("[SRF] blur() called");
                 }
             };
-
-            console.log("[SRF] Object properties:", Object.keys(obj));
-            return obj;
         };
 
         console.log("[SRF] Script loaded");
