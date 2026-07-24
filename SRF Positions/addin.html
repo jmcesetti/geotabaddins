@@ -10,20 +10,14 @@
     <script>
         console.log("[SRF] Script loading...");
 
-        geotab.addin.srfPositions = function (api_, state_) {
-            console.log("[SRF] geotab.addin.srfPositions called");
-            var api = api_;
+        geotab.addin.srfPositions = function (api, state) {
             return {
-                initialize: function (freshApi, freshState, callback) {
+                initialize: function (api, state, callback) {
                     try {
-                        console.log("[SRF] initialize() called");
-                        api = freshApi;
+                        window.geotabApi = api;
+                        window.geotabState = state;
 
-                        if (!api || typeof api.getSession !== 'function') {
-                            console.error("[SRF] ERROR: api or api.getSession is not available");
-                            callback();
-                            return;
-                        }
+                        console.log("[SRF] initialize() called");
 
                         api.getSession(function (session) {
                             try {
@@ -34,23 +28,23 @@
                                 console.log("[SRF] Full session:", session);
                             } catch (err) {
                                 console.error("[SRF] ERROR logging session:", err);
-                            } finally {
-                                callback();
                             }
+                            callback();
                         });
                     } catch (err) {
                         console.error("[SRF] ERROR in initialize:", err);
                         callback();
                     }
                 },
-                focus: function (freshApi) {
+
+                focus: function () {
                     try {
                         console.log("[SRF] focus() called");
-                        api = freshApi;
                     } catch (err) {
                         console.error("[SRF] ERROR in focus:", err);
                     }
                 },
+
                 blur: function () {
                     try {
                         console.log("[SRF] blur() called");
