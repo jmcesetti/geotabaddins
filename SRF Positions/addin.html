@@ -14,7 +14,7 @@
             return {
                 init: function (api) {
                     _api = api;
-                    console.log("[SRF] API initialized");
+                    
                 },
 
                 getSession: function (callback) {
@@ -34,7 +34,9 @@
                 }
             };
         })();
-
+        api.getSession(function (session) {
+        console.log(session.database);
+        });
         geotab.addin.srfPositions = function (api, state) {
             console.log("[SRF] Module loaded");
 
