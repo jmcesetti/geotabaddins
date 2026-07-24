@@ -8,33 +8,52 @@
     <script>
         console.log("[SRF] Script loading...");
 
-        geotab.addin.srfPositions = function (api, state) {
-            console.log("[SRF] Outer function called, api type:", typeof api);
-
-            return {
-                initialize: function (freshApi, freshState, callback) {
-                    console.log("[SRF] initialize() called");
-                    console.log("[SRF] freshApi type:", typeof freshApi);
-                    console.log("[SRF] freshState type:", typeof freshState);
-
-                    freshApi.getSession(function (session) {
-                        console.log("[SRF] === SESSION DATA ===");
-                        console.log("[SRF] Database:", session.database);
-                        console.log("[SRF] User:", session.userName);
-                        console.log("[SRF] SessionId:", session.sessionId);
-                        callback();
-                    });
-                },
-
-                focus: function () {
-                    console.log("[SRF] focus() called");
-                },
-
-                blur: function () {
-                    console.log("[SRF] blur() called");
+        // Esperar a que geotab esté disponible
+        if (typeof geotab !== 'undefined') {
+            console.log("[SRF] geotab is available");
+            registerAddin();
+        } else {
+            console.log("[SRF] Waiting for geotab...");
+            document.addEventListener('DOMContentLoaded', function () {
+                if (typeof geotab !== 'undefined') {
+                    registerAddin();
+                } else {
+                    console.error("[SRF] geotab is still not available");
                 }
+            });
+        }
+
+        function registerAddin() {
+            geotab.addin.srfPositions = function (api, state) {
+                console.log("[SRF] Outer function called, api type:", typeof api);
+
+                return {
+                    initialize: function (freshApi, freshState, callback) {
+                        console.log("[SRF] initialize() called");
+                        console.log("[SRF] freshApi type:", typeof freshApi);
+                        console.log("[SRF] freshState type:", typeof freshState);
+
+                        freshApi.getSession(function (session) {
+                            console.log("[SRF] === SESSION DATA ===");
+                            console.log("[SRF] Database:", session.database);
+                            console.log("[SRF] User:", session.userName);
+                            console.log("[SRF] SessionId:", session.sessionId);
+                            callback();
+                        });
+                    },
+
+                    focus: function () {
+                        console.log("[SRF] focus() called");
+                    },
+
+                    blur: function () {
+                        console.log("[SRF] blur() called");
+                    }
+                };
             };
-        };
+
+            console.log("[SRF] Add-in registered successfully");
+        }
 
         console.log("[SRF] Script loaded successfully");
     </script>
