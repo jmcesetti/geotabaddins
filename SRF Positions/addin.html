@@ -13,12 +13,23 @@
             console.log("[SRF] elt:", elt);
             console.log("[SRF] service:", service);
 
-            service.getSession(function (session) {
-                console.log("[SRF] Session:", session);
-                console.log("[SRF] Database:", session.database);
-                console.log("[SRF] User:", session.userName);
-                console.log("[SRF] SessionId:", session.sessionId);
-            });
+            try {
+                var circle = service.canvas.circle(
+                    { lat: -38.2112142, lng: -69.2293903 },
+                    12,
+                    5
+                )
+                .change({
+                    "fill": "#FF0000",
+                    "fill-opacity": 0.7,
+                    "stroke": "#CC0000",
+                    "stroke-width": 2
+                });
+
+                console.log("[SRF] Circle drawn successfully");
+            } catch (err) {
+                console.error("[SRF] Error drawing circle:", err);
+            }
         };
 
         console.log("[SRF] Script loaded, geotab.addin.srfPositions defined");
