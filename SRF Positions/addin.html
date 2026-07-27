@@ -172,12 +172,13 @@
 
                 let orgIdFromGeo = null;
                 try {
-                    const response = await fetch('https://media-services.geotab.com/api/DeviceMappings', {
+                    const response = await fetch('https://media-services.geotab.com', {
+                        method: 'GET',
                         headers: {
                             'x-mygeotab-database': session.database,
+                            'x-mygeotab-path': 'https://my.geotab.com',
                             'x-mygeotab-sessionid': session.sessionId,
-                            'x-mygeotab-username': session.userName,
-                            'Content-Type': 'application/json'
+                            'x-mygeotab-username': session.userName
                         }
                     });
                     if (response.ok) {
@@ -188,7 +189,7 @@
                         }
                     }
                 } catch (err) {
-                    console.log("[debug] Could not fetch DeviceMappings (CORS likely)");
+                    console.log("[debug] Could not fetch DeviceMappings:", err.message);
                 }
 
                 const matchingUnions = unions.filter(u => u.geotabdb && u.geotabdb.toLowerCase() === database.toLowerCase());
