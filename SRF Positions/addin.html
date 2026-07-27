@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <title>SRF Positions Map Add-in</title>
-    <!-- <style>
+    <style>
         * {
             margin: 0;
             padding: 0;
@@ -71,10 +71,10 @@
             background: #ffebee !important;
             color: #c62828 !important;
         }
-    </style> -->
+    </style>
 </head>
 <body>
-    <!-- <div id="addin-root"></div> -->
+    <div id="addin-root"></div>
 
     <script>
         console.log("[SRF] Script loading...");
@@ -127,46 +127,60 @@
                 clearDevices();
 
                 if (!Array.isArray(devices) || devices.length === 0) {
-                    console.log("[SRF] No devices to display");
                     return;
                 }
 
                 devices.forEach(device => {
                     if (!device.lat || !device.lon) {
-                        console.warn("[SRF] Device without coordinates:", device.name);
                         return;
                     }
 
+                    const isOnline = device.status === 'online';
+                    const isMoving = device.speed && device.speed > 0;
+
                     const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
                         .change({
-                            "fill": device.status === 'online' ? "#00cc00" : "#ff3333",
+                            "fill": isOnline ? "#00cc00" : "#ff3333",
                             "fill-opacity": 0.7,
-                            "stroke": device.status === 'online' ? "#009900" : "#cc0000",
+                            "stroke": isOnline ? "#009900" : "#cc0000",
                             "stroke-width": 2
-                        })
-                        .attach("over", function (coords) {
-                            service.tooltip.showAt(
-                                coords,
-                                {
-                                    main: device.name,
-                                    secondary: [
-                                        "Speed: " + (device.speed || 'N/A') + " km/h",
-                                        "Status: " + device.status,
-                                        "Lat: " + device.lat.toFixed(4),
-                                        "Lng: " + device.lon.toFixed(4)
-                                    ]
-                                },
-                                1
-                            );
-                        })
-                        .attach("out", function () {
-                            service.tooltip.hide();
                         });
 
-                    circles.push(circle);
-                });
+                    let symbolText = "☁";
+                    if (isOnline) {
+                        symbolText = isMoving ? "▶" : "⏹";
+                    }
 
-                console.log("[SRF] Drawn", circles.length, "device circles");
+                    const label = service.canvas.label({ lat: device.lat, lng: device.lon }, symbolText)
+                        .change({
+                            "font-size": "16px",
+                            "font-weight": "bold",
+                            "fill": "white",
+                            "text-anchor": "middle"
+                        });
+
+                    circle.attach("over", function (coords) {
+                        service.tooltip.showAt(
+                            coords,
+                            {
+                                main: device.name,
+                                secondary: [
+                                    "Speed: " + (device.speed || 'N/A') + " km/h",
+                                    "Status: " + device.status,
+                                    "Lat: " + device.lat.toFixed(4),
+                                    "Lng: " + device.lon.toFixed(4)
+                                ]
+                            },
+                            1
+                        );
+                    })
+                    .attach("out", function () {
+                        service.tooltip.hide();
+                    });
+
+                    circles.push(circle);
+                    circles.push(label);
+                });
             }
 
             function clearDevices() {
@@ -177,13 +191,8 @@
             async function loadAndDisplay() {
                 const statusEl = elt.querySelector("#srf-status");
                 try {
-                    console.log("[SRF] Starting loadAndDisplay");
-                    console.log("[SRF] Token value:", token);
                     statusEl.textContent = "Cargando dispositivos...";
                     const devices = await getDevices();
-                    console.log("[SRF] Got devices:", devices.length);
-                    console.log("[SRF] First device:", devices[0]);
-                    console.log("[SRF] All devices:", devices);
                     drawDevices(devices);
                     statusEl.textContent = `✓ ${devices.length} dispositivos cargados`;
                 } catch (err) {
