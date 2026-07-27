@@ -178,6 +178,7 @@
                 const statusEl = elt.querySelector("#srf-status");
                 try {
                     console.log("[SRF] Starting loadAndDisplay");
+                    console.log("[SRF] Token value:", token);
                     statusEl.textContent = "Cargando dispositivos...";
                     const devices = await getDevices();
                     console.log("[SRF] Got devices:", devices.length);
