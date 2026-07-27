@@ -138,19 +138,16 @@
                     const isOnline = device.status === 'online';
                     const isMoving = device.speed && device.speed > 0;
 
-                    let fillColor, strokeColor, symbol;
+                    let fillColor, strokeColor;
                     if (!isOnline) {
                         fillColor = "#999999";
                         strokeColor = "#333333";
-                        symbol = "#";
                     } else if (isMoving) {
                         fillColor = "#00cc00";
                         strokeColor = "#009900";
-                        symbol = "▶";
                     } else {
                         fillColor = "#ffcc00";
                         strokeColor = "#ff9900";
-                        symbol = "■";
                     }
 
                     const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
@@ -159,37 +156,27 @@
                             "fill-opacity": 0.8,
                             "stroke": strokeColor,
                             "stroke-width": 2
+                        })
+                        .attach("over", function (coords) {
+                            service.tooltip.showAt(
+                                coords,
+                                {
+                                    main: device.name,
+                                    secondary: [
+                                        "Speed: " + (device.speed || 'N/A') + " km/h",
+                                        "Status: " + device.status,
+                                        "Lat: " + device.lat.toFixed(4),
+                                        "Lng: " + device.lon.toFixed(4)
+                                    ]
+                                },
+                                1
+                            );
+                        })
+                        .attach("out", function () {
+                            service.tooltip.hide();
                         });
 
-                    const svgText = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' +
-                        '<text x="12" y="16" font-size="16" font-weight="bold" fill="white" text-anchor="middle">' +
-                        symbol +
-                        '</text></svg>';
-
-                    const textSvg = service.canvas.image({ lat: device.lat, lng: device.lon },
-                        'data:image/svg+xml;utf8,' + encodeURIComponent(svgText), 16, 16);
-
-                    circle.attach("over", function (coords) {
-                        service.tooltip.showAt(
-                            coords,
-                            {
-                                main: device.name,
-                                secondary: [
-                                    "Speed: " + (device.speed || 'N/A') + " km/h",
-                                    "Status: " + device.status,
-                                    "Lat: " + device.lat.toFixed(4),
-                                    "Lng: " + device.lon.toFixed(4)
-                                ]
-                            },
-                            1
-                        );
-                    })
-                    .attach("out", function () {
-                        service.tooltip.hide();
-                    });
-
                     circles.push(circle);
-                    circles.push(textSvg);
                 });
             }
 
