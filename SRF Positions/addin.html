@@ -84,15 +84,18 @@
         const ApiHelpers = (() => {
             let _api = null;
             let _session = null;
+            let _sessionPromise = null;
 
             function init(api) {
                 _api = api;
                 console.log("[SRF] API initialized");
-                _api.api.getSession().then(session => {
+                _sessionPromise = _api.api.getSession().then(session => {
                     _session = session;
                     console.log("[SRF] Database:", session.database);
+                    return session;
                 }).catch(err => {
                     console.error("[SRF] Error loading session:", err);
+                    throw err;
                 });
             }
 
@@ -104,7 +107,11 @@
                 return _session;
             }
 
-            return { init, getApi, getSession };
+            function getSessionPromise() {
+                return _sessionPromise;
+            }
+
+            return { init, getApi, getSession, getSessionPromise };
         })();
 
         async function fetchTokenFromGitHub() {
@@ -149,24 +156,8 @@
         }
 
         async function getOrgIdsFromGeotab() {
-            const session = ApiHelpers.getSession();
-            if (!session) {
-                throw new Error("Session not loaded yet");
-            }
-
             try {
-                const url = "https://media-services.geotab.com/api/DeviceMappings";
-                const response = await fetch(url, {
-                    headers: {
-                        'x-mygeotab-database': session.database,
-                        'x-mygeotab-sessionid': session.sessionId,
-                        'x-mygeotab-username': session.userName,
-                        'Content-Type': 'application/json'
-                    }
-                });
-                if (!response.ok) throw new Error(`Failed to fetch device mappings: ${response.status} ${response.statusText}`);
-                const mappingsData = await response.json();
-
+                const session = await ApiHelpers.getSessionPromise();
                 const unions = await getUnionsFromGitHub();
                 const database = session.database;
 
@@ -177,9 +168,6 @@
                     throw new Error(`No matching OrgIds found in unions.csv for database: ${database}`);
                 }
 
-                const orgIdFromMappings = mappingsData[0]?.partnerMetaData?.OrganizationId;
-
-                console.log("[SRF] OrgId from DeviceMappings:", orgIdFromMappings);
                 console.log("[SRF] OrgIds from unions.csv for database '" + database + "':", orgIds);
                 console.log("[SRF] Using OrgIds:", orgIds);
 
@@ -320,10 +308,15 @@
                 '</div>'
             ].join('');
 
-            console.log("[SRF] About to call loadAndDisplay");
-            loadAndDisplay();
-
-            setInterval(loadAndDisplay, 10000);
+            console.log("[SRF] Waiting for session to load before calling loadAndDisplay");
+            ApiHelpers.getSessionPromise().then(() => {
+                console.log("[SRF] Session ready, calling loadAndDisplay");
+                loadAndDisplay();
+                setInterval(loadAndDisplay, 10000);
+            }).catch(err => {
+                console.error("[SRF] Failed to load session:", err);
+                elt.querySelector("#srf-status").textContent = "✗ Error loading session";
+            });
         };
 
         console.log("[SRF] Script loaded successfully");
