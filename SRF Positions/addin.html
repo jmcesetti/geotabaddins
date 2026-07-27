@@ -161,8 +161,8 @@
                 const unions = await getUnionsFromGitHub();
                 const database = session.database;
 
-                const matchingUnions = unions.filter(u => u.database && u.database.toLowerCase() === database.toLowerCase());
-                const orgIds = matchingUnions.map(u => u.OrgId || u.orgId).filter(Boolean);
+                const matchingUnions = unions.filter(u => u.geotabdb && u.geotabdb.toLowerCase() === database.toLowerCase());
+                const orgIds = matchingUnions.map(u => u.id).filter(Boolean);
 
                 if (orgIds.length === 0) {
                     throw new Error(`No matching OrgIds found in unions.csv for database: ${database}`);
