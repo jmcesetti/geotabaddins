@@ -71,6 +71,158 @@
             background: #ffebee !important;
             color: #c62828 !important;
         }
+
+        .srf-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .srf-sidebar {
+            width: 350px;
+            background: white;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .srf-sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .srf-search {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+        .srf-filters {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 0;
+        }
+
+        .srf-filter-btn {
+            flex: 1;
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .srf-filter-btn:hover {
+            background: #f5f5f5;
+        }
+
+        .srf-filter-btn.active {
+            background: #1976d2;
+            color: white;
+            border-color: #1976d2;
+        }
+
+        .srf-devices-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .srf-group {
+            margin-bottom: 16px;
+        }
+
+        .srf-group-title {
+            font-weight: 600;
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            padding: 8px 12px;
+            background: #f5f5f5;
+            border-left: 3px solid #1976d2;
+            margin-bottom: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .srf-group-title:hover {
+            background: #ececec;
+        }
+
+        .srf-device-row {
+            padding: 10px 12px;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .srf-device-row:hover {
+            background: #f0f7ff;
+            border-color: #1976d2;
+            box-shadow: 0 2px 4px rgba(25, 118, 210, 0.1);
+        }
+
+        .srf-device-row.highlight {
+            background: #fff3cd;
+            border-color: #ffc107;
+        }
+
+        .srf-device-name {
+            font-weight: 600;
+            font-size: 13px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .srf-device-info {
+            font-size: 11px;
+            color: #666;
+            line-height: 1.4;
+        }
+
+        .srf-status-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+
+        .srf-status-online {
+            background: #c8e6c9;
+            color: #2e7d32;
+        }
+
+        .srf-status-offline {
+            background: #eeeeee;
+            color: #424242;
+        }
+
+        .srf-status-standby {
+            background: #fff9c4;
+            color: #f57f17;
+        }
+
+        .srf-map-container {
+            flex: 1;
+            background: white;
+        }
+
+        .srf-no-results {
+            padding: 16px;
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body>
@@ -229,6 +381,26 @@
         geotab.addin.srfPositions = function (elt, service) {
             ApiHelpers.init(service);
             let circles = [];
+            let allDevices = [];
+            let currentFilter = 'all';
+            let currentSearch = '';
+
+            const statusMap = {
+                'offline': 'Sin comunicación',
+                'online': 'Comunicando',
+                'standby': 'En espera'
+            };
+
+            function formatDeviceDate(dateString) {
+                const lastSeenDate = new Date(dateString);
+                const argDate = new Date(lastSeenDate.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }));
+                return argDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                    + ' ' + argDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+            }
+
+            function getStatusDisplay(status) {
+                return statusMap[status] || status;
+            }
 
             function drawDevices(devices) {
                 clearDevices();
@@ -271,10 +443,9 @@
                                 {
                                     main: device.name,
                                     secondary: [
-                                        "Speed: " + speed + " km/h",
-                                        "Status: " + device.status,
-                                        "Lat: " + device.lat.toFixed(4),
-                                        "Lng: " + device.lon.toFixed(4)
+                                        getStatusDisplay(device.status),
+                                        formatDeviceDate(device.lastSeenOnline),
+                                        speed + " km/h"
                                     ]
                                 },
                                 1
@@ -293,13 +464,115 @@
                 circles = [];
             }
 
+            function groupDevicesByStatus(devices) {
+                const groups = {
+                    'online': [],
+                    'standby': [],
+                    'offline': []
+                };
+
+                devices.forEach(device => {
+                    if (groups[device.status]) {
+                        groups[device.status].push(device);
+                    }
+                });
+
+                return groups;
+            }
+
+            function filterDevices(devices) {
+                let filtered = devices;
+
+                if (currentFilter !== 'all') {
+                    filtered = filtered.filter(d => d.status === currentFilter);
+                }
+
+                if (currentSearch.trim()) {
+                    const search = currentSearch.trim().toLowerCase();
+                    filtered = filtered.filter(d => d.name.toLowerCase().includes(search));
+                }
+
+                return filtered;
+            }
+
+            function renderDevicesList(devices) {
+                const container = elt.querySelector("#srf-devices-container");
+                const filtered = filterDevices(devices);
+                const grouped = groupDevicesByStatus(filtered);
+
+                container.innerHTML = '';
+
+                if (filtered.length === 0) {
+                    container.innerHTML = '<div class="srf-no-results">No hay dispositivos</div>';
+                    return;
+                }
+
+                ['online', 'standby', 'offline'].forEach(status => {
+                    const devicesInGroup = grouped[status];
+                    if (devicesInGroup.length === 0) return;
+
+                    const groupTitle = document.createElement('div');
+                    groupTitle.className = 'srf-group-title';
+                    groupTitle.textContent = `${getStatusDisplay(status)} (${devicesInGroup.length})`;
+                    container.appendChild(groupTitle);
+
+                    devicesInGroup.forEach(device => {
+                        const row = document.createElement('div');
+                        row.className = 'srf-device-row';
+                        const speed = device.speed ? Math.ceil(device.speed) : '0';
+                        const dateFormatted = formatDeviceDate(device.lastSeenOnline);
+
+                        let statusBadgeClass = 'srf-status-badge srf-status-' + device.status;
+                        row.innerHTML = `
+                            <div class="srf-device-name">${device.name}</div>
+                            <div class="srf-device-info">
+                                <span class="${statusBadgeClass}">${getStatusDisplay(device.status)}</span><br>
+                                <strong>Última comunicación:</strong> ${dateFormatted}<br>
+                                <strong>Velocidad:</strong> ${speed} km/h
+                            </div>
+                        `;
+
+                        row.addEventListener('click', () => {
+                            if (device.lat && device.lon) {
+                                service.map.setZoom(17);
+                                service.map.setCenter({ lat: device.lat, lng: device.lon });
+                                row.classList.add('highlight');
+                                setTimeout(() => row.classList.remove('highlight'), 1500);
+                            }
+                        });
+
+                        container.appendChild(row);
+                    });
+                });
+            }
+
+            function setupEventListeners() {
+                const searchInput = elt.querySelector("#srf-search");
+                const filterBtns = elt.querySelectorAll(".srf-filter-btn");
+
+                searchInput.addEventListener('input', (e) => {
+                    currentSearch = e.target.value;
+                    renderDevicesList(allDevices);
+                });
+
+                filterBtns.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        filterBtns.forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentFilter = btn.dataset.filter;
+                        renderDevicesList(allDevices);
+                    });
+                });
+            }
+
             async function loadAndDisplay(orgIdsData) {
                 const statusEl = elt.querySelector("#srf-status");
                 try {
                     statusEl.textContent = "Cargando dispositivos...";
-                    const devices = await getDevices(orgIdsData);
-                    drawDevices(devices);
-                    statusEl.textContent = `✓ ${devices.length} dispositivos cargados (${new Date().toLocaleTimeString()})`;
+                    allDevices = await getDevices(orgIdsData);
+                    drawDevices(allDevices);
+                    renderDevicesList(allDevices);
+                    statusEl.textContent = `✓ ${allDevices.length} dispositivos (${new Date().toLocaleTimeString()})`;
                 } catch (err) {
                     console.error("[ERR]", err);
                     statusEl.textContent = `✗ Error: ${err.message}`;
@@ -308,15 +581,27 @@
             }
 
             elt.innerHTML = [
-                '<div class="srf-panel">',
-                '  <h3 class="srf-title">SRF Positions</h3>',
-                '  <div id="srf-devices" class="srf-devices-list"></div>',
-                '  <div id="srf-status" class="srf-status">Inicializando...</div>',
+                '<div class="srf-container">',
+                '  <div class="srf-sidebar">',
+                '    <div class="srf-sidebar-header">',
+                '      <h3 class="srf-title">SRF Positions</h3>',
+                '      <input type="text" id="srf-search" class="srf-search" placeholder="Buscar por nombre...">',
+                '      <div class="srf-filters">',
+                '        <button class="srf-filter-btn active" data-filter="all">Todos</button>',
+                '        <button class="srf-filter-btn" data-filter="online">En línea</button>',
+                '        <button class="srf-filter-btn" data-filter="offline">Offline</button>',
+                '      </div>',
+                '    </div>',
+                '    <div id="srf-devices-container" class="srf-devices-container"></div>',
+                '    <div id="srf-status" class="srf-status">Inicializando...</div>',
+                '  </div>',
+                '  <div id="srf-map" class="srf-map-container"></div>',
                 '</div>'
             ].join('');
 
             ApiHelpers.getSessionPromise().then(async () => {
                 try {
+                    setupEventListeners();
                     await fetchTokenFromGitHub();
                     const orgIdsData = await getOrgIdsFromGeotab();
 
