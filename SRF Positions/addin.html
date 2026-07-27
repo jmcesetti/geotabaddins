@@ -158,12 +158,13 @@
                             "stroke-width": 2
                         })
                         .attach("over", function (coords) {
+                            const speed = device.speed ? Math.ceil(device.speed) : 'N/A';
                             service.tooltip.showAt(
                                 coords,
                                 {
                                     main: device.name,
                                     secondary: [
-                                        "Speed: " + (device.speed || 'N/A') + " km/h",
+                                        "Speed: " + speed + " km/h",
                                         "Status: " + device.status,
                                         "Lat: " + device.lat.toFixed(4),
                                         "Lng: " + device.lon.toFixed(4)
