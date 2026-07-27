@@ -376,8 +376,12 @@
                                 const lat = parseFloat(device.lat);
                                 const lng = parseFloat(device.lon);
                                 console.log("[SRF] Centrando en device:", device.name, "Lat:", lat, "Lng:", lng);
-                                service.map.setZoom(17);
-                                service.map.setCenter({ lat: lat, lng: lng });
+                                try {
+                                    service.map.panTo({ lat: lat, lng: lng });
+                                    service.map.setZoom(17);
+                                } catch (e) {
+                                    console.error("[ERR] Error al centrar mapa:", e);
+                                }
                                 row.style.background = '#fef3c7';
                                 row.style.borderColor = '#fbbf24';
                                 row.style.boxShadow = '0 2px 8px rgba(251, 191, 36, 0.2)';
@@ -455,9 +459,10 @@
 
             elt.style.width = '100%';
             elt.style.height = '100%';
+            elt.style.overflow = 'hidden';
             elt.innerHTML = [
                 '<div style="display:flex; height:100%; width:100%; font-family:\'Segoe UI\',Roboto,Arial,sans-serif; color:#333; background:#ffffff;">',
-                '  <div style="width:360px; background:#ffffff; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; overflow:hidden; box-shadow:2px 0 8px rgba(0,0,0,0.08);">',
+                '  <div style="width:360px; background:#ffffff; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; overflow:hidden; box-shadow:2px 0 8px rgba(0,0,0,0.08); height:100%;">',
                 '    <div style="padding:20px; border-bottom:1px solid #e5e7eb; background:#f9fafb;">',
                 '      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">',
                 '        <h3 style="font-size:18px; font-weight:700; color:#1f2937; letter-spacing:-0.5px; margin:0;">SRF Positions</h3>',
