@@ -93,18 +93,27 @@
 
                 if (_api.api && typeof _api.api.getSession === 'function') {
                     console.log("[SRF] Calling getSession...");
-                    _api.api.getSession((err, session) => {
-                        if (err) {
-                            console.error("[SRF] ERROR getting session:", err);
-                        } else {
-                            console.log("[SRF] Session:", session);
-                            console.log("[SRF] Session userId:", session?.userId);
-                            console.log("[SRF] Session database:", session?.database);
-                        }
-                    });
+                    try {
+                        const result = _api.api.getSession((err, session) => {
+                            console.log("[SRF] getSession callback fired");
+                            if (err) {
+                                console.error("[SRF] ERROR getting session:", err);
+                            } else {
+                                console.log("[SRF] Session received:", session);
+                                console.log("[SRF] Session keys:", Object.keys(session || {}));
+                            }
+                        });
+                        console.log("[SRF] getSession returned:", result);
+                    } catch (e) {
+                        console.error("[SRF] Exception calling getSession:", e);
+                    }
                 } else {
                     console.error("[SRF] getSession is not a function");
                 }
+
+                setTimeout(() => {
+                    console.log("[SRF] Timeout check - Session still waiting?");
+                }, 2000);
             }
 
             function getApi() {
