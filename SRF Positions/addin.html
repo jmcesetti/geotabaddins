@@ -147,7 +147,6 @@
                     unions.push(row);
                 }
 
-                console.log("[SRF] Unions loaded from GitHub:", unions.length, "rows");
                 return unions;
             } catch (err) {
                 console.error("[SRF] ERROR fetching unions.csv:", err);
@@ -168,8 +167,8 @@
                     throw new Error(`No matching OrgIds found in unions.csv for database: ${database}`);
                 }
 
-                console.log("[SRF] OrgIds from unions.csv for database '" + database + "':", orgIds);
-                console.log("[SRF] Using OrgIds:", orgIds);
+                console.log("[SRF] Database:", database);
+                console.log("[SRF] OrgIds from unions.csv:", orgIds);
 
                 return orgIds;
             } catch (err) {
@@ -182,7 +181,6 @@
             if (!token) await fetchTokenFromGitHub();
             try {
                 const url = `https://api-prod.surfsight.net/v2/organizations/${orgId}/devices`;
-                console.log("[SRF] Fetching devices from org:", orgId);
 
                 const response = await fetch(url, {
                     headers: {
@@ -194,7 +192,6 @@
                 const devicesData = await response.json();
 
                 const devices = devicesData.data || (Array.isArray(devicesData) ? devicesData : []);
-                console.log(`[SRF] Devices fetched from org ${orgId}:`, devices.length, "devices");
                 return devices;
             } catch (err) {
                 console.error("[SRF] ERROR fetching devices:", err);
@@ -202,15 +199,13 @@
             }
         }
 
-        async function getDevices() {
+        async function getDevices(orgIds) {
             try {
-                const orgIds = await getOrgIdsFromGeotab();
-
                 const devicePromises = orgIds.map(orgId => getDevicesByOrgId(orgId));
                 const allDevicesArrays = await Promise.all(devicePromises);
                 const allDevices = allDevicesArrays.flat();
 
-                console.log("[SRF] Total devices from all orgs:", allDevices.length);
+                console.log("[SRF] Total devices:", allDevices.length);
                 return allDevices;
             } catch (err) {
                 console.error("[SRF] ERROR in getDevices:", err);
@@ -286,11 +281,11 @@
                 circles = [];
             }
 
-            async function loadAndDisplay() {
+            async function loadAndDisplay(orgIds) {
                 const statusEl = elt.querySelector("#srf-status");
                 try {
                     statusEl.textContent = "Cargando dispositivos...";
-                    const devices = await getDevices();
+                    const devices = await getDevices(orgIds);
                     drawDevices(devices);
                     statusEl.textContent = `✓ ${devices.length} dispositivos cargados (${new Date().toLocaleTimeString()})`;
                 } catch (err) {
@@ -308,11 +303,10 @@
                 '</div>'
             ].join('');
 
-            console.log("[SRF] Waiting for session to load before calling loadAndDisplay");
-            ApiHelpers.getSessionPromise().then(() => {
-                console.log("[SRF] Session ready, calling loadAndDisplay");
-                loadAndDisplay();
-                setInterval(loadAndDisplay, 10000);
+            ApiHelpers.getSessionPromise().then(async () => {
+                const orgIds = await getOrgIdsFromGeotab();
+                loadAndDisplay(orgIds);
+                setInterval(() => loadAndDisplay(orgIds), 10000);
             }).catch(err => {
                 console.error("[SRF] Failed to load session:", err);
                 elt.querySelector("#srf-status").textContent = "✗ Error loading session";
