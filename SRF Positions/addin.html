@@ -376,20 +376,61 @@
                                 const lat = parseFloat(device.lat);
                                 const lng = parseFloat(device.lon);
                                 console.log("[SRF] Centrando en device:", device.name, "Lat:", lat, "Lng:", lng);
+
                                 try {
                                     const map = service.map;
+                                    console.log("[SRF] Map object:", map);
+                                    console.log("[SRF] Map methods disponibles:", Object.getOwnPropertyNames(Object.getPrototypeOf(map)));
+
+                                    // Método 1: panTo
                                     if (map.panTo) {
+                                        console.log("[SRF] Intentando panTo...");
                                         map.panTo({ lat: lat, lng: lng });
+                                        console.log("[SRF] panTo ejecutado");
+                                    } else {
+                                        console.log("[SRF] panTo no disponible");
                                     }
+
+                                    // Método 2: setZoom
                                     if (map.setZoom) {
+                                        console.log("[SRF] Intentando setZoom...");
                                         map.setZoom(17);
+                                        console.log("[SRF] setZoom ejecutado");
+                                    } else {
+                                        console.log("[SRF] setZoom no disponible");
                                     }
-                                    if (map.center) {
+
+                                    // Método 3: setCenter
+                                    if (map.setCenter) {
+                                        console.log("[SRF] Intentando setCenter...");
+                                        map.setCenter({ lat: lat, lng: lng });
+                                        console.log("[SRF] setCenter ejecutado");
+                                    } else {
+                                        console.log("[SRF] setCenter no disponible");
+                                    }
+
+                                    // Método 4: center property
+                                    if (map.center !== undefined) {
+                                        console.log("[SRF] Intentando asignar map.center...");
                                         map.center = { lat: lat, lng: lng };
+                                        console.log("[SRF] map.center asignado");
+                                    } else {
+                                        console.log("[SRF] map.center no disponible");
                                     }
+
+                                    // Método 5: zoom property
+                                    if (map.zoom !== undefined) {
+                                        console.log("[SRF] Intentando asignar map.zoom...");
+                                        map.zoom = 17;
+                                        console.log("[SRF] map.zoom asignado");
+                                    } else {
+                                        console.log("[SRF] map.zoom no disponible");
+                                    }
+
                                 } catch (e) {
                                     console.error("[ERR] Error al centrar mapa:", e);
                                 }
+
                                 row.style.background = '#fef3c7';
                                 row.style.borderColor = '#fbbf24';
                                 row.style.boxShadow = '0 2px 8px rgba(251, 191, 36, 0.2)';
@@ -466,7 +507,7 @@
             }
 
             elt.style.width = '100%';
-            elt.style.height = '720px';
+            elt.style.height = '80%';
             elt.style.overflow = 'hidden';
             elt.innerHTML = [
                 '<div style="display:flex; height:100%; width:100%; font-family:\'Segoe UI\',Roboto,Arial,sans-serif; color:#333; background:#ffffff;">',
