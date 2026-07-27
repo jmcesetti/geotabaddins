@@ -90,11 +90,7 @@
                 console.log("[SRF] API initialized");
                 _api.api.getSession().then(session => {
                     _session = session;
-                    console.log("[SRF] Session loaded:", {
-                        database: session.database,
-                        userName: session.userName,
-                        domain: session.domain
-                    });
+                    console.log("[SRF] Database:", session.database);
                 }).catch(err => {
                     console.error("[SRF] Error loading session:", err);
                 });
@@ -124,12 +120,81 @@
             }
         }
 
-        async function getDevices() {
+        async function getUnionsFromGitHub() {
+            try {
+                const url = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/unions.csv";
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Failed to fetch unions.csv: ${response.status}`);
+                const csv = await response.text();
+
+                const lines = csv.trim().split('\n');
+                const headers = lines[0].split(',').map(h => h.trim());
+                const unions = [];
+
+                for (let i = 1; i < lines.length; i++) {
+                    const values = lines[i].split(',').map(v => v.trim());
+                    const row = {};
+                    headers.forEach((header, index) => {
+                        row[header] = values[index];
+                    });
+                    unions.push(row);
+                }
+
+                console.log("[SRF] Unions loaded from GitHub:", unions.length, "rows");
+                return unions;
+            } catch (err) {
+                console.error("[SRF] ERROR fetching unions.csv:", err);
+                throw err;
+            }
+        }
+
+        async function getOrgIdsFromGeotab() {
+            const session = ApiHelpers.getSession();
+            if (!session) {
+                throw new Error("Session not loaded yet");
+            }
+
+            try {
+                const url = "https://media-services.geotab.com/api/DeviceMappings";
+                const response = await fetch(url, {
+                    headers: {
+                        'x-mygeotab-database': session.database,
+                        'x-mygeotab-sessionid': session.sessionId,
+                        'x-mygeotab-username': session.userName,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                if (!response.ok) throw new Error(`Failed to fetch device mappings: ${response.status} ${response.statusText}`);
+                const mappingsData = await response.json();
+
+                const unions = await getUnionsFromGitHub();
+                const database = session.database;
+
+                const matchingUnions = unions.filter(u => u.database && u.database.toLowerCase() === database.toLowerCase());
+                const orgIds = matchingUnions.map(u => u.OrgId || u.orgId).filter(Boolean);
+
+                if (orgIds.length === 0) {
+                    throw new Error(`No matching OrgIds found in unions.csv for database: ${database}`);
+                }
+
+                const orgIdFromMappings = mappingsData[0]?.partnerMetaData?.OrganizationId;
+
+                console.log("[SRF] OrgId from DeviceMappings:", orgIdFromMappings);
+                console.log("[SRF] OrgIds from unions.csv for database '" + database + "':", orgIds);
+                console.log("[SRF] Using OrgIds:", orgIds);
+
+                return orgIds;
+            } catch (err) {
+                console.error("[SRF] ERROR getting OrgIds:", err);
+                throw err;
+            }
+        }
+
+        async function getDevicesByOrgId(orgId) {
             if (!token) await fetchTokenFromGitHub();
             try {
-                const orgId = 59257;
                 const url = `https://api-prod.surfsight.net/v2/organizations/${orgId}/devices`;
-                console.log("[SRF] Fetching from:", url);
+                console.log("[SRF] Fetching devices from org:", orgId);
 
                 const response = await fetch(url, {
                     headers: {
@@ -141,10 +206,26 @@
                 const devicesData = await response.json();
 
                 const devices = devicesData.data || (Array.isArray(devicesData) ? devicesData : []);
-                console.log("[SRF] Devices fetched:", devices.length, "devices");
+                console.log(`[SRF] Devices fetched from org ${orgId}:`, devices.length, "devices");
                 return devices;
             } catch (err) {
                 console.error("[SRF] ERROR fetching devices:", err);
+                throw err;
+            }
+        }
+
+        async function getDevices() {
+            try {
+                const orgIds = await getOrgIdsFromGeotab();
+
+                const devicePromises = orgIds.map(orgId => getDevicesByOrgId(orgId));
+                const allDevicesArrays = await Promise.all(devicePromises);
+                const allDevices = allDevicesArrays.flat();
+
+                console.log("[SRF] Total devices from all orgs:", allDevices.length);
+                return allDevices;
+            } catch (err) {
+                console.error("[SRF] ERROR in getDevices:", err);
                 throw err;
             }
         }
