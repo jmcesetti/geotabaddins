@@ -81,6 +81,23 @@
 
         let token = null;
 
+        const ApiHelpers = (() => {
+            let _api = null;
+
+            function init(api) {
+                _api = api;
+                console.log("[SRF] API initialized");
+                console.log("[SRF] API components:", Object.keys(_api));
+                console.log("[SRF] Full API object:", _api);
+            }
+
+            function getApi() {
+                return _api;
+            }
+
+            return { init, getApi };
+        })();
+
         async function fetchTokenFromGitHub() {
             try {
                 const response = await fetch('https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt');
@@ -121,6 +138,7 @@
 
         geotab.addin.srfPositions = function (elt, service) {
             console.log("[SRF] Module registered with elt and service");
+            ApiHelpers.init(service);
             let circles = [];
 
             function drawDevices(devices) {

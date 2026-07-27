@@ -31,53 +31,30 @@
             color: #1976d2;
         }
 
-        .srf-coords {
-            background: #f5f5f5;
-            padding: 12px;
-            border-radius: 4px;
-            margin-bottom: 12px;
-            font-size: 12px;
-            line-height: 1.6;
+        .srf-devices-list {
+            max-height: 400px;
+            overflow-y: auto;
         }
 
-        .srf-label {
-            font-weight: 600;
-            color: #666;
-        }
-
-        .srf-actions {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-
-        .srf-btn {
-            flex: 1;
-            padding: 8px 12px;
-            border: none;
-            border-radius: 4px;
+        .srf-device-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
             cursor: pointer;
-            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .srf-device-item:hover {
+            background: #f5f5f5;
+        }
+
+        .srf-device-name {
             font-weight: 600;
-            transition: all 0.2s;
-        }
-
-        .srf-btn--primary {
-            background: #1976d2;
-            color: white;
-        }
-
-        .srf-btn--primary:hover {
-            background: #1565c0;
-        }
-
-        .srf-btn--secondary {
-            background: #e0e0e0;
             color: #333;
         }
 
-        .srf-btn--secondary:hover {
-            background: #d0d0d0;
+        .srf-device-speed {
+            font-size: 11px;
+            color: #666;
         }
 
         .srf-status {
@@ -87,7 +64,12 @@
             border-radius: 4px;
             font-size: 12px;
             text-align: center;
-            min-height: 24px;
+            margin-top: 12px;
+        }
+
+        .srf-error {
+            background: #ffebee !important;
+            color: #c62828 !important;
         }
     </style>
 </head>
@@ -95,85 +77,144 @@
     <div id="addin-root"></div>
 
     <script>
+        console.log("[SRF] Script loading...");
+
+        let token = null;
+
+        async function fetchTokenFromGitHub() {
+            try {
+                const response = await fetch('https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt');
+                if (!response.ok) throw new Error(`Failed to fetch token: ${response.statusText}`);
+                token = (await response.text()).trim();
+                console.log("[SRF] Token loaded from GitHub");
+                return token;
+            } catch (err) {
+                console.error("[SRF] ERROR fetching token:", err);
+                throw err;
+            }
+        }
+
+        async function getDevices() {
+            if (!token) await fetchTokenFromGitHub();
+            try {
+                const orgId = 59257;
+                const url = `https://api-prod.surfsight.net/v2/organizations/${orgId}/devices`;
+                console.log("[SRF] Fetching from:", url);
+
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                if (!response.ok) throw new Error(`Failed to fetch devices: ${response.status} ${response.statusText}`);
+                const devicesData = await response.json();
+
+                const devices = devicesData.data || (Array.isArray(devicesData) ? devicesData : []);
+                console.log("[SRF] Devices fetched:", devices.length, "devices");
+                return devices;
+            } catch (err) {
+                console.error("[SRF] ERROR fetching devices:", err);
+                throw err;
+            }
+        }
+
         geotab.addin.srfPositions = function (elt, service) {
-            var circle = null;
+            console.log("[SRF] Module registered with elt and service");
+            let circles = [];
 
-            var LAT = -38.2112142;
-            var LNG = -69.2293903;
-            var RADIUS = 12;
-            var Z_INDEX = 10;
+            function drawDevices(devices) {
+                clearDevices();
 
-            function drawCircle() {
-                if (circle) {
-                    circle.remove();
-                    circle = null;
+                if (!Array.isArray(devices) || devices.length === 0) {
+                    return;
                 }
 
-                circle = service.canvas.circle({ lat: LAT, lng: LNG }, RADIUS, Z_INDEX)
-                    .change({
-                        "fill": "#FF0000",
-                        "fill-opacity": 0.7,
-                        "stroke": "#CC0000",
-                        "stroke-width": 2
-                    })
-                    .attach("click", function () {
-                        console.log("SRF: circulo clickeado");
-                    })
-                    .attach("over", function (coords) {
-                        service.tooltip.showAt(
-                            coords,
-                            {
-                                main: "Posicion SRF",
-                                secondary: ["Lat: " + LAT, "Lng: " + LNG]
-                            },
-                            1
-                        );
-                    })
-                    .attach("out", function () {
-                        service.tooltip.hide();
-                    });
+                devices.forEach(device => {
+                    if (!device.lat || !device.lon) {
+                        return;
+                    }
 
-                console.log("SRF Positions: circulo dibujado en", LAT, LNG);
+                    const isOnline = device.status === 'online';
+                    const isMoving = device.speed && device.speed > 0;
+
+                    let fillColor, strokeColor;
+                    if (!isOnline) {
+                        fillColor = "#999999";
+                        strokeColor = "#333333";
+                    } else if (isMoving) {
+                        fillColor = "#00cc00";
+                        strokeColor = "#009900";
+                    } else {
+                        fillColor = "#ffcc00";
+                        strokeColor = "#ff9900";
+                    }
+
+                    const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
+                        .change({
+                            "fill": fillColor,
+                            "fill-opacity": 0.8,
+                            "stroke": strokeColor,
+                            "stroke-width": 2
+                        })
+                        .attach("over", function (coords) {
+                            const speed = device.speed ? Math.ceil(device.speed) : 'N/A';
+                            service.tooltip.showAt(
+                                coords,
+                                {
+                                    main: device.name,
+                                    secondary: [
+                                        "Speed: " + speed + " km/h",
+                                        "Status: " + device.status,
+                                        "Lat: " + device.lat.toFixed(4),
+                                        "Lng: " + device.lon.toFixed(4)
+                                    ]
+                                },
+                                1
+                            );
+                        })
+                        .attach("out", function () {
+                            service.tooltip.hide();
+                        });
+
+                    circles.push(circle);
+                });
             }
 
-            function clearCircle() {
-                if (circle) {
-                    circle.remove();
-                    circle = null;
-                    console.log("SRF Positions: circulo eliminado");
+            function clearDevices() {
+                circles.forEach(circle => circle.remove());
+                circles = [];
+            }
+
+            async function loadAndDisplay() {
+                const statusEl = elt.querySelector("#srf-status");
+                try {
+                    statusEl.textContent = "Cargando dispositivos...";
+                    const devices = await getDevices();
+                    drawDevices(devices);
+                    statusEl.textContent = `✓ ${devices.length} dispositivos cargados (${new Date().toLocaleTimeString()})`;
+                } catch (err) {
+                    console.error("[SRF] ERROR:", err);
+                    statusEl.textContent = `✗ Error: ${err.message}`;
+                    statusEl.classList.add("srf-error");
                 }
             }
 
-            // Build the panel UI
             elt.innerHTML = [
                 '<div class="srf-panel">',
                 '  <h3 class="srf-title">SRF Positions</h3>',
-                '  <div class="srf-coords">',
-                '    <span class="srf-label">Lat:</span> ' + LAT,
-                '    <br>',
-                '    <span class="srf-label">Lng:</span> ' + LNG,
-                '  </div>',
-                '  <div class="srf-actions">',
-                '    <button id="srf-draw" class="srf-btn srf-btn--primary">Dibujar</button>',
-                '    <button id="srf-clear" class="srf-btn srf-btn--secondary">Limpiar</button>',
-                '  </div>',
-                '  <div id="srf-status" class="srf-status"></div>',
+                '  <div id="srf-devices" class="srf-devices-list"></div>',
+                '  <div id="srf-status" class="srf-status">Inicializando...</div>',
                 '</div>'
             ].join('');
 
-            elt.querySelector("#srf-draw").addEventListener("click", function () {
-                drawCircle();
-                elt.querySelector("#srf-status").textContent = "Circulo dibujado.";
-            });
+            console.log("[SRF] About to call loadAndDisplay");
+            loadAndDisplay();
 
-            elt.querySelector("#srf-clear").addEventListener("click", function () {
-                clearCircle();
-                elt.querySelector("#srf-status").textContent = "Limpiar.";
-            });
-
-            // Draw immediately on load
-            drawCircle();
+            setInterval(loadAndDisplay, 10000);
         };
+
+        console.log("[SRF] Script loaded successfully");
     </script>
 </body>
 </html>
