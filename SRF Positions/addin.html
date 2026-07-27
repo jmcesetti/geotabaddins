@@ -87,8 +87,13 @@
             function init(api) {
                 _api = api;
                 console.log("[SRF] API initialized");
-                console.log("[SRF] API components:", Object.keys(_api));
-                console.log("[SRF] Full API object:", _api);
+                _api.api.getSession((err, session) => {
+                    if (err) {
+                        console.error("[SRF] ERROR getting session:", err);
+                    } else {
+                        console.log("[SRF] Session:", session);
+                    }
+                });
             }
 
             function getApi() {
