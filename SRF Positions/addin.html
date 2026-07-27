@@ -83,44 +83,32 @@
 
         const ApiHelpers = (() => {
             let _api = null;
+            let _session = null;
 
             function init(api) {
                 _api = api;
                 console.log("[SRF] API initialized");
-                console.log("[SRF] _api.api type:", typeof _api.api);
-                console.log("[SRF] _api.api exists:", !!_api.api);
-                console.log("[SRF] _api.api.getSession type:", typeof _api.api.getSession);
-
-                if (_api.api && typeof _api.api.getSession === 'function') {
-                    console.log("[SRF] Calling getSession...");
-                    try {
-                        const result = _api.api.getSession((err, session) => {
-                            console.log("[SRF] getSession callback fired");
-                            if (err) {
-                                console.error("[SRF] ERROR getting session:", err);
-                            } else {
-                                console.log("[SRF] Session received:", session);
-                                console.log("[SRF] Session keys:", Object.keys(session || {}));
-                            }
-                        });
-                        console.log("[SRF] getSession returned:", result);
-                    } catch (e) {
-                        console.error("[SRF] Exception calling getSession:", e);
-                    }
-                } else {
-                    console.error("[SRF] getSession is not a function");
-                }
-
-                setTimeout(() => {
-                    console.log("[SRF] Timeout check - Session still waiting?");
-                }, 2000);
+                _api.api.getSession().then(session => {
+                    _session = session;
+                    console.log("[SRF] Session loaded:", {
+                        database: session.database,
+                        userName: session.userName,
+                        domain: session.domain
+                    });
+                }).catch(err => {
+                    console.error("[SRF] Error loading session:", err);
+                });
             }
 
             function getApi() {
                 return _api;
             }
 
-            return { init, getApi };
+            function getSession() {
+                return _session;
+            }
+
+            return { init, getApi, getSession };
         })();
 
         async function fetchTokenFromGitHub() {
