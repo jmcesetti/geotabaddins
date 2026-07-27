@@ -88,13 +88,11 @@
 
             function init(api) {
                 _api = api;
-                console.log("[SRF] API initialized");
                 _sessionPromise = _api.api.getSession().then(session => {
                     _session = session;
-                    console.log("[SRF] Database:", session.database);
                     return session;
                 }).catch(err => {
-                    console.error("[SRF] Error loading session:", err);
+                    console.error("[ERR] Error loading session:", err);
                     throw err;
                 });
             }
@@ -119,10 +117,10 @@
                 const response = await fetch('https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt');
                 if (!response.ok) throw new Error(`Failed to fetch token: ${response.statusText}`);
                 token = (await response.text()).trim();
-                console.log("[SRF] Token loaded from GitHub");
+                console.log("[SRF] Token loaded");
                 return token;
             } catch (err) {
-                console.error("[SRF] ERROR fetching token:", err);
+                console.error("[ERR] Fetching token:", err);
                 throw err;
             }
         }
@@ -149,7 +147,7 @@
 
                 return unions;
             } catch (err) {
-                console.error("[SRF] ERROR fetching unions.csv:", err);
+                console.error("[ERR] Fetching unions.csv:", err);
                 throw err;
             }
         }
@@ -161,18 +159,18 @@
                 const database = session.database;
 
                 const matchingUnions = unions.filter(u => u.geotabdb && u.geotabdb.toLowerCase() === database.toLowerCase());
-                const orgIds = matchingUnions.map(u => u.id).filter(Boolean);
+                const orgIdsFromCsv = matchingUnions.map(u => u.id).filter(Boolean);
 
-                if (orgIds.length === 0) {
+                if (orgIdsFromCsv.length === 0) {
                     throw new Error(`No matching OrgIds found in unions.csv for database: ${database}`);
                 }
 
-                console.log("[SRF] Database:", database);
-                console.log("[SRF] OrgIds from unions.csv:", orgIds);
+                console.log("[debug] DeviceMappings response:", JSON.stringify(matchingUnions));
+                console.log("[SRF] Database: " + database + " > geo: [pending] - csv: " + JSON.stringify(orgIdsFromCsv));
 
-                return orgIds;
+                return orgIdsFromCsv;
             } catch (err) {
-                console.error("[SRF] ERROR getting OrgIds:", err);
+                console.error("[ERR] Getting OrgIds:", err);
                 throw err;
             }
         }
@@ -208,13 +206,12 @@
                 console.log("[SRF] Total devices:", allDevices.length);
                 return allDevices;
             } catch (err) {
-                console.error("[SRF] ERROR in getDevices:", err);
+                console.error("[ERR] In getDevices:", err);
                 throw err;
             }
         }
 
         geotab.addin.srfPositions = function (elt, service) {
-            console.log("[SRF] Module registered with elt and service");
             ApiHelpers.init(service);
             let circles = [];
 
@@ -289,7 +286,7 @@
                     drawDevices(devices);
                     statusEl.textContent = `✓ ${devices.length} dispositivos cargados (${new Date().toLocaleTimeString()})`;
                 } catch (err) {
-                    console.error("[SRF] ERROR:", err);
+                    console.error("[ERR]", err);
                     statusEl.textContent = `✗ Error: ${err.message}`;
                     statusEl.classList.add("srf-error");
                 }
@@ -308,7 +305,7 @@
                 loadAndDisplay(orgIds);
                 setInterval(() => loadAndDisplay(orgIds), 10000);
             }).catch(err => {
-                console.error("[SRF] Failed to load session:", err);
+                console.error("[ERR] Failed to load session:", err);
                 elt.querySelector("#srf-status").textContent = "✗ Error loading session";
             });
         };
