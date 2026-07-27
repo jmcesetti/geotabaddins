@@ -377,8 +377,16 @@
                                 const lng = parseFloat(device.lon);
                                 console.log("[SRF] Centrando en device:", device.name, "Lat:", lat, "Lng:", lng);
                                 try {
-                                    service.map.panTo({ lat: lat, lng: lng });
-                                    service.map.setZoom(17);
+                                    const map = service.map;
+                                    if (map.panTo) {
+                                        map.panTo({ lat: lat, lng: lng });
+                                    }
+                                    if (map.setZoom) {
+                                        map.setZoom(17);
+                                    }
+                                    if (map.center) {
+                                        map.center = { lat: lat, lng: lng };
+                                    }
                                 } catch (e) {
                                     console.error("[ERR] Error al centrar mapa:", e);
                                 }
@@ -458,7 +466,7 @@
             }
 
             elt.style.width = '100%';
-            elt.style.height = '100%';
+            elt.style.height = '720px';
             elt.style.overflow = 'hidden';
             elt.innerHTML = [
                 '<div style="display:flex; height:100%; width:100%; font-family:\'Segoe UI\',Roboto,Arial,sans-serif; color:#333; background:#ffffff;">',
