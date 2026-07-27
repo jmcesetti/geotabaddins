@@ -123,12 +123,6 @@
             console.log("[SRF] Module registered with elt and service");
             let circles = [];
 
-            const svgIcons = {
-                play: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="%23ffffff" viewBox="0 0 256 256"><path d="M232.4,114.49,88.32,26.35a16,16,0,0,0-16.2-.3A15.86,15.86,0,0,0,64,39.87V216.13A15.94,15.94,0,0,0,80,232a16.07,16.07,0,0,0,8.36-2.35L232.4,141.51a15.81,15.81,0,0,0,0-27ZM80,215.94V40l143.83,88Z"></path></svg>',
-                pause: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="%23ffffff" viewBox="0 0 256 256"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216ZM112,96v64a8,8,0,0,1-16,0V96a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V96a8,8,0,0,1,16,0Z"></path></svg>',
-                cloud: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="%23ffffff" viewBox="0 0 256 256"><path d="M160,40A88.09,88.09,0,0,0,81.29,88.67,64,64,0,1,0,72,216h88a88,88,0,0,0,0-176Zm0,160H72a48,48,0,0,1,0-96c1.1,0,2.2,0,3.29.11A88,88,0,0,0,72,128a8,8,0,0,0,16,0,72,72,0,1,1,72,72Zm29.66-82.34L171.31,136l18.35,18.34a8,8,0,0,1-11.32,11.32L160,147.31l-18.34,18.35a8,8,0,0,1-11.32-11.32L148.69,136l-18.35-18.34a8,8,0,0,1,11.32-11.32L160,124.69l18.34-18.35a8,8,0,0,1,11.32,11.32Z"></path></svg>'
-            };
-
             function drawDevices(devices) {
                 clearDevices();
 
@@ -144,22 +138,19 @@
                     const isOnline = device.status === 'online';
                     const isMoving = device.speed && device.speed > 0;
 
-                    let fillColor, strokeColor, strokeWidth, iconUrl;
+                    let fillColor, strokeColor, symbol;
                     if (!isOnline) {
                         fillColor = "#999999";
                         strokeColor = "#333333";
-                        strokeWidth = 3;
-                        iconUrl = svgIcons.cloud;
+                        symbol = "#";
                     } else if (isMoving) {
                         fillColor = "#00cc00";
                         strokeColor = "#009900";
-                        strokeWidth = 2;
-                        iconUrl = svgIcons.play;
+                        symbol = "▶";
                     } else {
                         fillColor = "#ffcc00";
                         strokeColor = "#ff9900";
-                        strokeWidth = 2;
-                        iconUrl = svgIcons.pause;
+                        symbol = "■";
                     }
 
                     const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
@@ -167,14 +158,16 @@
                             "fill": fillColor,
                             "fill-opacity": 0.8,
                             "stroke": strokeColor,
-                            "stroke-width": strokeWidth
+                            "stroke-width": 2
                         });
 
-                    const icon = service.canvas.image({ lat: device.lat, lng: device.lon }, iconUrl, 20, 20)
-                        .change({
-                            "opacity": 0.95,
-                            "transform": "translate(-10px, -10px)"
-                        });
+                    const svgText = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' +
+                        '<text x="12" y="16" font-size="16" font-weight="bold" fill="white" text-anchor="middle">' +
+                        symbol +
+                        '</text></svg>';
+
+                    const textSvg = service.canvas.image({ lat: device.lat, lng: device.lon },
+                        'data:image/svg+xml;utf8,' + encodeURIComponent(svgText), 16, 16);
 
                     circle.attach("over", function (coords) {
                         service.tooltip.showAt(
@@ -196,7 +189,7 @@
                     });
 
                     circles.push(circle);
-                    circles.push(icon);
+                    circles.push(textSvg);
                 });
             }
 
