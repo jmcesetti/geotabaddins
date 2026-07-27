@@ -138,48 +138,45 @@
                     const isOnline = device.status === 'online';
                     const isMoving = device.speed && device.speed > 0;
 
-                    const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
-                        .change({
-                            "fill": isOnline ? "#00cc00" : "#ff3333",
-                            "fill-opacity": 0.7,
-                            "stroke": isOnline ? "#009900" : "#cc0000",
-                            "stroke-width": 2
-                        });
-
-                    let symbolText = "☁";
-                    if (isOnline) {
-                        symbolText = isMoving ? "▶" : "⏹";
+                    let fillColor, strokeColor;
+                    if (!isOnline) {
+                        fillColor = "#999999";
+                        strokeColor = "#666666";
+                    } else if (isMoving) {
+                        fillColor = "#00cc00";
+                        strokeColor = "#009900";
+                    } else {
+                        fillColor = "#ffcc00";
+                        strokeColor = "#ff9900";
                     }
 
-                    const label = service.canvas.label({ lat: device.lat, lng: device.lon }, symbolText)
+                    const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
                         .change({
-                            "font-size": "16px",
-                            "font-weight": "bold",
-                            "fill": "white",
-                            "text-anchor": "middle"
+                            "fill": fillColor,
+                            "fill-opacity": 0.7,
+                            "stroke": strokeColor,
+                            "stroke-width": 2
+                        })
+                        .attach("over", function (coords) {
+                            service.tooltip.showAt(
+                                coords,
+                                {
+                                    main: device.name,
+                                    secondary: [
+                                        "Speed: " + (device.speed || 'N/A') + " km/h",
+                                        "Status: " + device.status,
+                                        "Lat: " + device.lat.toFixed(4),
+                                        "Lng: " + device.lon.toFixed(4)
+                                    ]
+                                },
+                                1
+                            );
+                        })
+                        .attach("out", function () {
+                            service.tooltip.hide();
                         });
 
-                    circle.attach("over", function (coords) {
-                        service.tooltip.showAt(
-                            coords,
-                            {
-                                main: device.name,
-                                secondary: [
-                                    "Speed: " + (device.speed || 'N/A') + " km/h",
-                                    "Status: " + device.status,
-                                    "Lat: " + device.lat.toFixed(4),
-                                    "Lng: " + device.lon.toFixed(4)
-                                ]
-                            },
-                            1
-                        );
-                    })
-                    .attach("out", function () {
-                        service.tooltip.hide();
-                    });
-
                     circles.push(circle);
-                    circles.push(label);
                 });
             }
 
