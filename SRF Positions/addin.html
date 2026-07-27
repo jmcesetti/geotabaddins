@@ -182,6 +182,8 @@
                     statusEl.textContent = "Cargando dispositivos...";
                     const devices = await getDevices();
                     console.log("[SRF] Got devices:", devices.length);
+                    console.log("[SRF] First device:", devices[0]);
+                    console.log("[SRF] All devices:", devices);
                     drawDevices(devices);
                     statusEl.textContent = `✓ ${devices.length} dispositivos cargados`;
                 } catch (err) {
