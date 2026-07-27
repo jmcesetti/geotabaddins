@@ -87,13 +87,24 @@
             function init(api) {
                 _api = api;
                 console.log("[SRF] API initialized");
-                _api.api.getSession((err, session) => {
-                    if (err) {
-                        console.error("[SRF] ERROR getting session:", err);
-                    } else {
-                        console.log("[SRF] Session:", session);
-                    }
-                });
+                console.log("[SRF] _api.api type:", typeof _api.api);
+                console.log("[SRF] _api.api exists:", !!_api.api);
+                console.log("[SRF] _api.api.getSession type:", typeof _api.api.getSession);
+
+                if (_api.api && typeof _api.api.getSession === 'function') {
+                    console.log("[SRF] Calling getSession...");
+                    _api.api.getSession((err, session) => {
+                        if (err) {
+                            console.error("[SRF] ERROR getting session:", err);
+                        } else {
+                            console.log("[SRF] Session:", session);
+                            console.log("[SRF] Session userId:", session?.userId);
+                            console.log("[SRF] Session database:", session?.database);
+                        }
+                    });
+                } else {
+                    console.error("[SRF] getSession is not a function");
+                }
             }
 
             function getApi() {
