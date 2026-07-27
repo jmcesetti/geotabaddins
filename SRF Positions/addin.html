@@ -14,7 +14,7 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             font-size: 13px;
             color: #333;
-            background: #f5f5f5;
+            background: #ffffff;
         }
 
         .srf-panel {
@@ -25,10 +25,11 @@
         }
 
         .srf-title {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: #1976d2;
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            color: #1f2937;
+            letter-spacing: -0.5px;
         }
 
         .srf-devices-list {
@@ -58,18 +59,21 @@
         }
 
         .srf-status {
-            padding: 8px;
-            background: #e8f5e9;
-            color: #2e7d32;
-            border-radius: 4px;
+            padding: 12px;
+            background: #ecfdf5;
+            color: #065f46;
+            border-radius: 6px;
             font-size: 12px;
             text-align: center;
             margin-top: 12px;
+            border: 1px solid #a7f3d0;
+            font-weight: 500;
         }
 
         .srf-error {
-            background: #ffebee !important;
-            color: #c62828 !important;
+            background: #fee2e2 !important;
+            color: #991b1b !important;
+            border-color: #fecaca !important;
         }
 
         .srf-container {
@@ -78,26 +82,40 @@
         }
 
         .srf-sidebar {
-            width: 350px;
-            background: white;
-            border-right: 1px solid #e0e0e0;
+            width: 360px;
+            background: #ffffff;
+            border-right: 1px solid #e5e7eb;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
         }
 
         .srf-sidebar-header {
-            padding: 16px;
-            border-bottom: 1px solid #e0e0e0;
+            padding: 20px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #f9fafb;
         }
 
         .srf-search {
             width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
             font-size: 13px;
             margin-bottom: 12px;
+            background: white;
+            color: #1f2937;
+        }
+
+        .srf-search::placeholder {
+            color: #9ca3af;
+        }
+
+        .srf-search:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
         }
 
         .srf-filters {
@@ -108,29 +126,49 @@
 
         .srf-filter-btn {
             flex: 1;
-            padding: 6px 8px;
-            border: 1px solid #ddd;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
             background: white;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 12px;
+            font-weight: 500;
             cursor: pointer;
             transition: all 0.2s;
+            color: #6b7280;
         }
 
         .srf-filter-btn:hover {
-            background: #f5f5f5;
+            background: #f3f4f6;
+            border-color: #9ca3af;
         }
 
         .srf-filter-btn.active {
-            background: #1976d2;
+            background: #3b82f6;
             color: white;
-            border-color: #1976d2;
+            border-color: #3b82f6;
         }
 
         .srf-devices-container {
             flex: 1;
             overflow-y: auto;
-            padding: 8px;
+            padding: 12px;
+        }
+
+        .srf-devices-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .srf-devices-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .srf-devices-container::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 3px;
+        }
+
+        .srf-devices-container::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af;
         }
 
         .srf-group {
@@ -138,78 +176,87 @@
         }
 
         .srf-group-title {
-            font-weight: 600;
-            font-size: 12px;
-            color: #666;
+            font-weight: 700;
+            font-size: 11px;
+            color: #6b7280;
             text-transform: uppercase;
-            padding: 8px 12px;
-            background: #f5f5f5;
-            border-left: 3px solid #1976d2;
-            margin-bottom: 8px;
+            padding: 10px 12px;
+            background: #f3f4f6;
+            border-left: 3px solid #3b82f6;
+            margin-bottom: 10px;
             cursor: pointer;
             user-select: none;
+            letter-spacing: 0.5px;
         }
 
         .srf-group-title:hover {
-            background: #ececec;
+            background: #ececf1;
         }
 
         .srf-device-row {
-            padding: 10px 12px;
+            padding: 12px;
             background: white;
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            margin-bottom: 6px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin-bottom: 8px;
             cursor: pointer;
             transition: all 0.2s;
         }
 
         .srf-device-row:hover {
-            background: #f0f7ff;
-            border-color: #1976d2;
-            box-shadow: 0 2px 4px rgba(25, 118, 210, 0.1);
+            background: #f0f4ff;
+            border-color: #3b82f6;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.12);
         }
 
         .srf-device-row.highlight {
-            background: #fff3cd;
-            border-color: #ffc107;
+            background: #fef3c7;
+            border-color: #fbbf24;
+            box-shadow: 0 2px 8px rgba(251, 191, 36, 0.2);
         }
 
         .srf-device-name {
-            font-weight: 600;
-            font-size: 13px;
-            color: #333;
-            margin-bottom: 4px;
+            font-weight: 700;
+            font-size: 14px;
+            color: #1f2937;
+            margin-bottom: 8px;
+            letter-spacing: -0.3px;
         }
 
         .srf-device-info {
-            font-size: 11px;
-            color: #666;
-            line-height: 1.4;
+            font-size: 12px;
+            color: #6b7280;
+            line-height: 1.6;
+        }
+
+        .srf-device-info strong {
+            color: #374151;
+            font-weight: 600;
         }
 
         .srf-status-badge {
             display: inline-block;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
             font-weight: 600;
             margin-right: 6px;
+            letter-spacing: 0.3px;
         }
 
         .srf-status-online {
-            background: #c8e6c9;
-            color: #2e7d32;
+            background: #d1fae5;
+            color: #065f46;
         }
 
         .srf-status-offline {
-            background: #eeeeee;
-            color: #424242;
+            background: #f3f4f6;
+            color: #6b7280;
         }
 
         .srf-status-standby {
-            background: #fff9c4;
-            color: #f57f17;
+            background: #fef08a;
+            color: #854d0e;
         }
 
         .srf-map-container {
@@ -392,10 +439,23 @@
             };
 
             function formatDeviceDate(dateString) {
-                const lastSeenDate = new Date(dateString);
-                const argDate = new Date(lastSeenDate.toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }));
-                return argDate.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-                    + ' ' + argDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+                if (!dateString) return 'N/A';
+                try {
+                    const date = new Date(dateString);
+                    if (isNaN(date.getTime())) return 'N/A';
+                    const formatter = new Intl.DateTimeFormat('es-AR', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                        timeZone: 'America/Argentina/Buenos_Aires'
+                    });
+                    return formatter.format(date);
+                } catch (e) {
+                    return 'N/A';
+                }
             }
 
             function getStatusDisplay(status) {
