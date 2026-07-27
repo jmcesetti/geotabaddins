@@ -77,7 +77,23 @@
     <div id="addin-root"></div>
 
     <script>
-        console.log("[SRF] Script loading...");
+        let commitMessage = "";
+
+        async function getLastCommitMessage() {
+            try {
+                const response = await fetch('https://api.github.com/repos/jmcesetti/geotabaddins/commits?path=SRF%20Positions/addin.html&per_page=1');
+                const commits = await response.json();
+                if (commits.length > 0) {
+                    commitMessage = commits[0].commit.message.split('\n')[0];
+                }
+            } catch (err) {
+                console.error("[debug] Could not fetch commit message:", err);
+            }
+        }
+
+        getLastCommitMessage().then(() => {
+            console.log("[SRF] Script loaded successfully (" + commitMessage + ")");
+        });
 
         let token = null;
 
@@ -321,7 +337,7 @@
             });
         };
 
-        console.log("[SRF] Script loaded successfully");
+        console.log("[SRF] Script loaded successfully (" + commitMessage + ")");
     </script>
 </body>
 </html>
