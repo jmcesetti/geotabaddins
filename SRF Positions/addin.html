@@ -97,7 +97,7 @@
         async function getDevices() {
             if (!token) await fetchTokenFromGitHub();
             try {
-                const orgId = 59257;
+                const orgId = 56088;
                 const url = `https://api-prod.surfsight.net/v2/organizations/${orgId}/devices`;
                 console.log("[SRF] Fetching from:", url);
 
