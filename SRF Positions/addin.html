@@ -375,6 +375,18 @@
                                     row.style.borderColor = '#e5e7eb';
                                     row.style.boxShadow = 'none';
                                 }, 1500);
+                            } else {
+                                const statusEl = elt.querySelector("#srf-status");
+                                const originalBg = statusEl.style.background;
+                                const originalColor = statusEl.style.color;
+                                statusEl.style.background = '#fee2e2';
+                                statusEl.style.color = '#991b1b';
+                                statusEl.textContent = '✗ Ubicación desconocida para ' + device.name;
+                                setTimeout(() => {
+                                    statusEl.style.background = originalBg;
+                                    statusEl.style.color = originalColor;
+                                    statusEl.textContent = '✓ ' + (allDevices.length || 0) + ' dispositivos';
+                                }, 2000);
                             }
                         });
 
@@ -434,16 +446,19 @@
                 }
             }
 
+            elt.style.width = '100%';
+            elt.style.height = '100%';
             elt.innerHTML = [
-                '<div style="display:flex; height:100vh; font-family:\'Segoe UI\',Roboto,Arial,sans-serif; color:#333; background:#ffffff;">',
+                '<div style="display:flex; height:100%; width:100%; font-family:\'Segoe UI\',Roboto,Arial,sans-serif; color:#333; background:#ffffff;">',
                 '  <div style="width:360px; background:#ffffff; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; overflow:hidden; box-shadow:2px 0 8px rgba(0,0,0,0.08);">',
                 '    <div style="padding:20px; border-bottom:1px solid #e5e7eb; background:#f9fafb;">',
                 '      <h3 style="font-size:18px; font-weight:700; margin-bottom:16px; color:#1f2937; letter-spacing:-0.5px;">SRF Positions</h3>',
-                '      <input type="text" id="srf-search" placeholder="Buscar por nombre..." style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:12px; background:white; color:#1f2937;">',
-                '      <div style="display:flex; gap:8px;">',
-                '        <button class="srf-filter-btn-all" data-filter="all" style="flex:1; padding:8px 12px; border:1px solid #d1d5db; background:#3b82f6; color:white; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s; border-color:#3b82f6;">Todos</button>',
-                '        <button class="srf-filter-btn-other" data-filter="online" style="flex:1; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En línea</button>',
-                '        <button class="srf-filter-btn-other" data-filter="offline" style="flex:1; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">Offline</button>',
+                '      <input type="text" id="srf-search" placeholder="Buscar por nombre..." style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:12px; background:white; color:#1f2937; box-sizing:border-box;">',
+                '      <div style="display:flex; gap:8px; flex-wrap:wrap;">',
+                '        <button class="srf-filter-btn-all" data-filter="all" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:#3b82f6; color:white; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s; border-color:#3b82f6;">Todos</button>',
+                '        <button class="srf-filter-btn-other" data-filter="online" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En línea</button>',
+                '        <button class="srf-filter-btn-other" data-filter="standby" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En espera</button>',
+                '        <button class="srf-filter-btn-other" data-filter="offline" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">Offline</button>',
                 '      </div>',
                 '    </div>',
                 '    <div id="srf-devices-container" style="flex:1; overflow-y:auto; padding:12px;"></div>',
