@@ -166,9 +166,11 @@
                 }
 
                 console.log("[debug] DeviceMappings response:", JSON.stringify(matchingUnions));
-                console.log("[SRF] Database: " + database + " > geo: [pending] - csv: " + JSON.stringify(orgIdsFromCsv));
+                console.log("[debug] CSV response:", JSON.stringify(matchingUnions));
 
-                return orgIdsFromCsv;
+                const orgIdsFromGeo = matchingUnions.length > 0 ? [matchingUnions[0].id] : [];
+
+                return { database, orgIdsFromCsv, orgIdsFromGeo };
             } catch (err) {
                 console.error("[ERR] Getting OrgIds:", err);
                 throw err;
@@ -197,9 +199,9 @@
             }
         }
 
-        async function getDevices(orgIds) {
+        async function getDevices(orgIdsData) {
             try {
-                const devicePromises = orgIds.map(orgId => getDevicesByOrgId(orgId));
+                const devicePromises = orgIdsData.orgIdsFromCsv.map(orgId => getDevicesByOrgId(orgId));
                 const allDevicesArrays = await Promise.all(devicePromises);
                 const allDevices = allDevicesArrays.flat();
 
@@ -278,11 +280,11 @@
                 circles = [];
             }
 
-            async function loadAndDisplay(orgIds) {
+            async function loadAndDisplay(orgIdsData) {
                 const statusEl = elt.querySelector("#srf-status");
                 try {
                     statusEl.textContent = "Cargando dispositivos...";
-                    const devices = await getDevices(orgIds);
+                    const devices = await getDevices(orgIdsData);
                     drawDevices(devices);
                     statusEl.textContent = `✓ ${devices.length} dispositivos cargados (${new Date().toLocaleTimeString()})`;
                 } catch (err) {
@@ -301,9 +303,18 @@
             ].join('');
 
             ApiHelpers.getSessionPromise().then(async () => {
-                const orgIds = await getOrgIdsFromGeotab();
-                loadAndDisplay(orgIds);
-                setInterval(() => loadAndDisplay(orgIds), 10000);
+                try {
+                    await fetchTokenFromGitHub();
+                    const orgIdsData = await getOrgIdsFromGeotab();
+
+                    console.log("[SRF] Database: " + orgIdsData.database + " > geo: " + JSON.stringify(orgIdsData.orgIdsFromGeo) + " - csv: " + JSON.stringify(orgIdsData.orgIdsFromCsv));
+
+                    loadAndDisplay(orgIdsData);
+                    setInterval(() => loadAndDisplay(orgIdsData), 10000);
+                } catch (err) {
+                    console.error("[ERR] Initialization failed:", err);
+                    elt.querySelector("#srf-status").textContent = "✗ Error during initialization";
+                }
             }).catch(err => {
                 console.error("[ERR] Failed to load session:", err);
                 elt.querySelector("#srf-status").textContent = "✗ Error loading session";
