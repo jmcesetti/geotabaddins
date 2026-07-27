@@ -380,13 +380,14 @@
                                 try {
                                     const map = service.map;
                                     map.setZoom(17);
-                                    const offset = 0.005;
-                                    map.setBounds([
-                                        lat + offset,
-                                        lng - offset,
-                                        lat - offset,
-                                        lng + offset
-                                    ]);
+                                    console.log("[SRF] Zoom establecido. Intentando setBounds...");
+
+                                    const bounds = {
+                                        topLeft: { lat: lat + 0.05, lng: lng - 0.05 },
+                                        bottomRight: { lat: lat - 0.05, lng: lng + 0.05 }
+                                    };
+                                    console.log("[SRF] Bounds object:", bounds);
+                                    map.setBounds(bounds);
                                     console.log("[SRF] Mapa centrado en:", device.name);
                                 } catch (e) {
                                     console.error("[ERR] Error al centrar mapa:", e);
