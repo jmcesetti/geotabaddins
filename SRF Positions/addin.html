@@ -129,7 +129,7 @@
 
         async function getUnionsFromGitHub() {
             try {
-                const url = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/unions.csv";
+                const url = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/main/SRF%20Positions/unions.csv";
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`Failed to fetch unions.csv: ${response.status}`);
                 const csv = await response.text();
