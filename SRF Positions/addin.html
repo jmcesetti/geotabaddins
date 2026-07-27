@@ -97,7 +97,7 @@
         async function getDevices() {
             if (!token) await fetchTokenFromGitHub();
             try {
-                const orgId = 56088;
+                const orgId = 59257;
                 const url = `https://api-prod.surfsight.net/v2/organizations/${orgId}/devices`;
                 console.log("[SRF] Fetching from:", url);
 
@@ -191,7 +191,7 @@
                     statusEl.textContent = "Cargando dispositivos...";
                     const devices = await getDevices();
                     drawDevices(devices);
-                    statusEl.textContent = `✓ ${devices.length} dispositivos cargados`;
+                    statusEl.textContent = `✓ ${devices.length} dispositivos cargados (${new Date().toLocaleTimeString()})`;
                 } catch (err) {
                     console.error("[SRF] ERROR:", err);
                     statusEl.textContent = `✗ Error: ${err.message}`;
@@ -209,6 +209,8 @@
 
             console.log("[SRF] About to call loadAndDisplay");
             loadAndDisplay();
+
+            setInterval(loadAndDisplay, 10000);
         };
 
         console.log("[SRF] Script loaded successfully");
