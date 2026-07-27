@@ -144,19 +144,19 @@
                     const isOnline = device.status === 'online';
                     const isMoving = device.speed && device.speed > 0;
 
-                    let fillColor, strokeColor, iconSrc;
+                    let fillColor, strokeColor, symbol;
                     if (!isOnline) {
                         fillColor = "#999999";
                         strokeColor = "#666666";
-                        iconSrc = svgIcons.cloud;
+                        symbol = "☁";
                     } else if (isMoving) {
                         fillColor = "#00cc00";
                         strokeColor = "#009900";
-                        iconSrc = svgIcons.play;
+                        symbol = "▶";
                     } else {
                         fillColor = "#ffcc00";
                         strokeColor = "#ff9900";
-                        iconSrc = svgIcons.pause;
+                        symbol = "⏸";
                     }
 
                     const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
@@ -167,9 +167,13 @@
                             "stroke-width": 2
                         });
 
-                    const icon = service.canvas.image({ lat: device.lat, lng: device.lon }, iconSrc, 20, 20)
+                    const textLabel = service.canvas.text({ lat: device.lat, lng: device.lon }, symbol)
                         .change({
-                            "opacity": 0.9
+                            "font-size": "14px",
+                            "font-weight": "bold",
+                            "fill": "white",
+                            "text-anchor": "middle",
+                            "dominant-baseline": "central"
                         });
 
                     circle.attach("over", function (coords) {
@@ -192,7 +196,7 @@
                     });
 
                     circles.push(circle);
-                    circles.push(icon);
+                    circles.push(textLabel);
                 });
             }
 
