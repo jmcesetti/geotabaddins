@@ -110,7 +110,7 @@
                 if (!response.ok) throw new Error(`Failed to fetch devices: ${response.status} ${response.statusText}`);
                 const devicesData = await response.json();
 
-                const devices = Array.isArray(devicesData) ? devicesData : Object.values(devicesData);
+                const devices = devicesData.data || (Array.isArray(devicesData) ? devicesData : []);
                 console.log("[SRF] Devices fetched:", devices.length, "devices");
                 return devices;
             } catch (err) {
