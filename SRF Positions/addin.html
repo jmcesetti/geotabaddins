@@ -577,14 +577,17 @@
             const devicesContainer = elt.querySelector("#srf-devices-container");
 
             function updateLayout() {
+                if (!panel || !header || !footer || !devicesContainer) return;
                 const panelHeight = panel.offsetHeight;
                 const headerHeight = header.offsetHeight;
                 const footerHeight = footer.offsetHeight;
                 const availableHeight = panelHeight - headerHeight - footerHeight;
                 devicesContainer.style.height = availableHeight + 'px';
+                devicesContainer.style.flex = 'none';
             }
 
-            setTimeout(updateLayout, 0);
+            setTimeout(updateLayout, 50);
+            setTimeout(updateLayout, 200);
             window.addEventListener('resize', updateLayout);
 
             ApiHelpers.getSessionPromise().then(async () => {
