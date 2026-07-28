@@ -587,7 +587,13 @@
                     }, 10000);
                 } catch (err) {
                     console.error("[ERR] Initialization failed:", err);
-                    elt.querySelector("#srf-status").textContent = "✗ Error during initialization";
+                    const statusEl = elt.querySelector("#srf-status");
+                    if (err.message.includes("No matching OrgIds found")) {
+                        statusEl.textContent = "✗ Sin Id para esta organización";
+                    } else {
+                        statusEl.textContent = "✗ Error during initialization";
+                    }
+                    statusEl.classList.add("srf-error");
                 }
             }).catch(err => {
                 console.error("[ERR] Failed to load session:", err);
