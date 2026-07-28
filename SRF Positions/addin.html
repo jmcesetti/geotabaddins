@@ -380,22 +380,19 @@
                         row.style.opacity = '1';
 
                         if (hasLocation) {
-                            row.addEventListener('click', () => {
+                            row.addEventListener('click', async () => {
                                 const lat = parseFloat(device.lat);
                                 const lng = parseFloat(device.lon);
                                 console.log("[SRF] Centrando en device:", device.name, "Lat:", lat, "Lng:", lng);
 
                                 try {
                                     const map = service.map;
-                                    map.setZoom(17);
-                                    console.log("[SRF] Zoom establecido. Intentando setBounds...");
-
+                                    const padding = 0.02;
                                     const bounds = {
-                                        topLeft: { lat: lat + 0.05, lng: lng - 0.05 },
-                                        bottomRight: { lat: lat - 0.05, lng: lng + 0.05 }
+                                        sw: { lat: lat - padding, lng: lng - padding },
+                                        ne: { lat: lat + padding, lng: lng + padding }
                                     };
-                                    console.log("[SRF] Bounds object:", bounds);
-                                    map.setBounds(bounds);
+                                    await map.setBounds(bounds);
                                     console.log("[SRF] Mapa centrado en:", device.name);
                                 } catch (e) {
                                     console.error("[ERR] Error al centrar mapa:", e);
