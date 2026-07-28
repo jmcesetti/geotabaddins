@@ -106,7 +106,7 @@
                 const unions = await getUnionsFromGitHub();
                 const database = session.database;
 
-                const matchingUnions = unions.filter(u => u.geotabdb && u.geotabdb.toLowerCase() === database.toLowerCase());
+                const matchingUnions = unions.filter(u => u.geotab_db && u.geotab_db.toLowerCase() === database.toLowerCase());
 
                 const allSrfIds = matchingUnions.map(u => u.srfid);
                 const allGtbIds = matchingUnions.map(u => u.gtbid);
