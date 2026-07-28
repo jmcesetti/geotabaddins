@@ -23,6 +23,7 @@
         }
 
         let token = null;
+        let isTokenValid = true;
 
         const ApiHelpers = (() => {
             let _api = null;
@@ -131,6 +132,13 @@
                         'Content-Type': 'application/json'
                     }
                 });
+
+                if (response.status === 401) {
+                    isTokenValid = false;
+                    console.log("[SRF] Token inválido");
+                    throw new Error("TokenInvalid");
+                }
+
                 if (!response.ok) throw new Error(`Failed to fetch devices: ${response.status} ${response.statusText}`);
                 const devicesData = await response.json();
 
@@ -463,7 +471,10 @@
                     countEl.textContent = allDevices.length;
                 } catch (err) {
                     console.error("[ERR]", err);
-                    statusEl.textContent = `✗ Error: ${err.message}`;
+                    const errorMsg = err.message === "TokenInvalid"
+                        ? "Token incorrecto o vencido"
+                        : err.message;
+                    statusEl.textContent = `✗ ${errorMsg}`;
                     statusEl.classList.add("srf-error");
                 }
             }
