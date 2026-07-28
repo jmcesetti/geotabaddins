@@ -546,48 +546,46 @@
             elt.style.width = '100%';
             elt.style.height = '100%';
             elt.style.overflow = 'hidden';
-            elt.innerHTML = [
-                '<div style="display:flex; height:100%; width:100%; font-family:\'Segoe UI\',Roboto,Arial,sans-serif; color:#333; background:#ffffff;">',
-                '  <div style="width:360px; background:#ffffff; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; overflow:hidden; box-shadow:2px 0 8px rgba(0,0,0,0.08); height:100%; min-height:0;">',
-                '    <div style="padding:20px; border-bottom:1px solid #e5e7eb; background:#f9fafb; flex-shrink:0;">',
-                '      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">',
-                '        <h3 style="font-size:18px; font-weight:700; color:#1f2937; letter-spacing:-0.5px; margin:0;">SRF Positions</h3>',
-                '        <span id="srf-device-count" style="font-size:11px; font-weight:600; color:#6b7280; background:#e5e7eb; padding:4px 8px; border-radius:4px;">0</span>',
-                '      </div>',
-                '      <input type="text" id="srf-search" placeholder="Buscar por nombre..." style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:12px; background:white; color:#1f2937; box-sizing:border-box;">',
-                '      <div style="display:flex; gap:8px; flex-wrap:wrap;">',
-                '        <button class="srf-filter-btn-all" data-filter="all" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:#3b82f6; color:white; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s; border-color:#3b82f6;">Todos</button>',
-                '        <button class="srf-filter-btn-other" data-filter="online" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En línea</button>',
-                '        <button class="srf-filter-btn-other" data-filter="standby" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En espera</button>',
-                '        <button class="srf-filter-btn-other" data-filter="offline" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">Offline</button>',
-                '      </div>',
-                '    </div>',
-                '    <div id="srf-devices-container" style="flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; padding:12px; -webkit-overflow-scrolling:touch;"></div>',
-                '    <div style="padding:12px; border-top:1px solid #e5e7eb; background:#f9fafb; flex-shrink:0;">',
-                '      <div id="srf-status" style="padding:12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500;">Inicializando...</div>',
-                '    </div>',
-                '  </div>',
-                '  <div id="srf-map" style="flex:1; background:white;"></div>',
-                '</div>'
-            ].join('');
+            elt.innerHTML = `
+                <div style="display:flex; height:100%; width:100%; font-family:'Segoe UI',Roboto,Arial,sans-serif; color:#333; background:#ffffff;">
+                  <div id="srf-panel" style="width:360px; background:#ffffff; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; box-shadow:2px 0 8px rgba(0,0,0,0.08);">
+                    <div id="srf-header" style="padding:20px; border-bottom:1px solid #e5e7eb; background:#f9fafb;">
+                      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                        <h3 style="font-size:18px; font-weight:700; color:#1f2937; letter-spacing:-0.5px; margin:0;">SRF Positions</h3>
+                        <span id="srf-device-count" style="font-size:11px; font-weight:600; color:#6b7280; background:#e5e7eb; padding:4px 8px; border-radius:4px;">0</span>
+                      </div>
+                      <input type="text" id="srf-search" placeholder="Buscar por nombre..." style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:12px; background:white; color:#1f2937; box-sizing:border-box;">
+                      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="srf-filter-btn-all" data-filter="all" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:#3b82f6; color:white; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s; border-color:#3b82f6;">Todos</button>
+                        <button class="srf-filter-btn-other" data-filter="online" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En línea</button>
+                        <button class="srf-filter-btn-other" data-filter="standby" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En espera</button>
+                        <button class="srf-filter-btn-other" data-filter="offline" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">Offline</button>
+                      </div>
+                    </div>
+                    <div id="srf-devices-container" style="overflow-y:scroll; overflow-x:hidden; padding:12px; -webkit-overflow-scrolling:touch;"></div>
+                    <div id="srf-footer" style="padding:12px; border-top:1px solid #e5e7eb; background:#f9fafb;">
+                      <div id="srf-status" style="padding:12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500;">Inicializando...</div>
+                    </div>
+                  </div>
+                  <div id="srf-map" style="flex:1; background:white;"></div>
+                </div>
+            `;
 
+            const panel = elt.querySelector("#srf-panel");
+            const header = elt.querySelector("#srf-header");
+            const footer = elt.querySelector("#srf-footer");
             const devicesContainer = elt.querySelector("#srf-devices-container");
-            const panel = elt.querySelector("div[style*='width:360px']");
-            const header = panel.querySelector("div[style*='border-bottom']");
-            const footer = panel.querySelector("div[style*='border-top']");
 
-            function updateContainerHeight() {
-                if (panel && devicesContainer && header && footer) {
-                    const panelHeight = panel.offsetHeight;
-                    const headerHeight = header.offsetHeight;
-                    const footerHeight = footer.offsetHeight;
-                    const containerHeight = panelHeight - headerHeight - footerHeight;
-                    devicesContainer.style.height = containerHeight + 'px';
-                }
+            function updateLayout() {
+                const panelHeight = panel.offsetHeight;
+                const headerHeight = header.offsetHeight;
+                const footerHeight = footer.offsetHeight;
+                const availableHeight = panelHeight - headerHeight - footerHeight;
+                devicesContainer.style.height = availableHeight + 'px';
             }
 
-            setTimeout(updateContainerHeight, 100);
-            window.addEventListener('resize', updateContainerHeight);
+            setTimeout(updateLayout, 0);
+            window.addEventListener('resize', updateLayout);
 
             ApiHelpers.getSessionPromise().then(async () => {
                 try {
