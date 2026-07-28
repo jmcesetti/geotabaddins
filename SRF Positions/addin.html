@@ -108,8 +108,8 @@
 
                 const matchingUnions = unions.filter(u => u.geotab_db && u.geotab_db.toLowerCase() === database.toLowerCase());
 
-                const allSrfIds = matchingUnions.map(u => u.srfid);
-                const allGtbIds = matchingUnions.map(u => u.gtbid);
+                const allSrfIds = matchingUnions.map(u => u.id);
+                const allGtbIds = matchingUnions.map(u => u.geotab_id);
 
                 const orgIdsFromCsv = allSrfIds.filter(id => id && id.toLowerCase() !== 'null');
                 const orgIdsFromGeo = allGtbIds.filter(id => id && id.toLowerCase() !== 'null');
