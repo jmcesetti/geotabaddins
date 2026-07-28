@@ -571,26 +571,6 @@
                 </div>
             `;
 
-            const panel = elt.querySelector("#srf-panel");
-            const header = elt.querySelector("#srf-header");
-            const footer = elt.querySelector("#srf-footer");
-            const devicesContainer = elt.querySelector("#srf-devices-container");
-
-            function updateLayout() {
-                if (!panel || !header || !footer || !devicesContainer) return;
-                const panelHeight = panel.offsetHeight;
-                const headerHeight = header.offsetHeight;
-                const footerHeight = footer.offsetHeight;
-                const availableHeight = panelHeight - headerHeight - footerHeight;
-                devicesContainer.style.height = availableHeight + 'px';
-                devicesContainer.style.flex = 'none';
-                console.log(`[SRF] Panel: ${panelHeight}px, Header: ${headerHeight}px, Footer: ${footerHeight}px, Container: ${availableHeight}px`);
-            }
-
-            setTimeout(updateLayout, 50);
-            setTimeout(updateLayout, 200);
-            window.addEventListener('resize', updateLayout);
-
             ApiHelpers.getSessionPromise().then(async () => {
                 try {
                     setupEventListeners();
