@@ -571,6 +571,24 @@
                 '</div>'
             ].join('');
 
+            const devicesContainer = elt.querySelector("#srf-devices-container");
+            const panel = elt.querySelector("div[style*='width:360px']");
+            const header = panel.querySelector("div[style*='border-bottom']");
+            const footer = panel.querySelector("div[style*='border-top']");
+
+            function updateContainerHeight() {
+                if (panel && devicesContainer && header && footer) {
+                    const panelHeight = panel.offsetHeight;
+                    const headerHeight = header.offsetHeight;
+                    const footerHeight = footer.offsetHeight;
+                    const containerHeight = panelHeight - headerHeight - footerHeight;
+                    devicesContainer.style.height = containerHeight + 'px';
+                }
+            }
+
+            setTimeout(updateContainerHeight, 100);
+            window.addEventListener('resize', updateContainerHeight);
+
             ApiHelpers.getSessionPromise().then(async () => {
                 try {
                     setupEventListeners();
