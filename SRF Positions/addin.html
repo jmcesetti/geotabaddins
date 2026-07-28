@@ -24,6 +24,10 @@
 
         let token = null;
         let isTokenValid = true;
+        let tokenCheckTimeoutId = null;
+        let regularRefreshIntervalId = null;
+        const tokenRetryDelays = [60000, 180000, 300000, 600000];
+        let tokenRetryIndex = 0;
 
         const ApiHelpers = (() => {
             let _api = null;
@@ -148,6 +152,54 @@
                 console.error("[SRF] ERROR fetching devices:", err);
                 throw err;
             }
+        }
+
+        async function checkTokenValidity() {
+            try {
+                await fetchTokenFromGitHub();
+                const testUrl = 'https://api-prod.surfsight.net/v2/organizations/test';
+                const response = await fetch(testUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                return response.status !== 401;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function scheduleTokenRetry() {
+            if (tokenCheckTimeoutId) clearTimeout(tokenCheckTimeoutId);
+
+            const delay = tokenRetryDelays[Math.min(tokenRetryIndex, tokenRetryDelays.length - 1)];
+            const delayMin = delay / 60000;
+            console.log(`[SRF] Reintentando token en ${delayMin}m...`);
+
+            tokenCheckTimeoutId = setTimeout(async () => {
+                const isValid = await checkTokenValidity();
+                if (isValid) {
+                    isTokenValid = true;
+                    tokenRetryIndex = 0;
+                    console.log("[SRF] Token válido nuevamente. Reanudando carga de dispositivos...");
+                    if (elt && elt.querySelector("#srf-status")) {
+                        elt.querySelector("#srf-status").textContent = "Inicializando...";
+                        elt.querySelector("#srf-status").classList.remove("srf-error");
+                    }
+                    ApiHelpers.getSessionPromise().then(async () => {
+                        try {
+                            const orgIdsData = await getOrgIdsFromGeotab();
+                            loadAndDisplay(orgIdsData);
+                        } catch (err) {
+                            console.error("[ERR] Error reloading after token fix:", err);
+                        }
+                    });
+                } else {
+                    tokenRetryIndex++;
+                    scheduleTokenRetry();
+                }
+            }, delay);
         }
 
         async function getDevices(orgIdsData) {
@@ -459,6 +511,15 @@
                 const statusEl = elt.querySelector("#srf-status");
                 const countEl = elt.querySelector("#srf-device-count");
                 try {
+                    if (!isTokenValid) {
+                        statusEl.textContent = "✗ Token incorrecto o vencido";
+                        statusEl.classList.add("srf-error");
+                        if (!tokenCheckTimeoutId) {
+                            scheduleTokenRetry();
+                        }
+                        return;
+                    }
+
                     statusEl.textContent = "Cargando dispositivos...";
                     allDevices = await getDevices(orgIdsData);
                     drawDevices(allDevices);
@@ -468,11 +529,17 @@
                     countEl.textContent = allDevices.length;
                 } catch (err) {
                     console.error("[ERR]", err);
-                    const errorMsg = err.message === "TokenInvalid"
-                        ? "Token incorrecto o vencido"
-                        : err.message;
-                    statusEl.textContent = `✗ ${errorMsg}`;
-                    statusEl.classList.add("srf-error");
+                    if (err.message === "TokenInvalid") {
+                        isTokenValid = false;
+                        statusEl.textContent = "✗ Token incorrecto o vencido";
+                        statusEl.classList.add("srf-error");
+                        if (!tokenCheckTimeoutId) {
+                            scheduleTokenRetry();
+                        }
+                    } else {
+                        statusEl.textContent = `✗ ${err.message}`;
+                        statusEl.classList.add("srf-error");
+                    }
                 }
             }
 
@@ -513,7 +580,11 @@
                     console.log("[SRF] Database: " + orgIdsData.database + " > geo: " + JSON.stringify(orgIdsData.allGtbIds) + " - srf: " + JSON.stringify(orgIdsData.allSrfIds));
 
                     loadAndDisplay(orgIdsData);
-                    setInterval(() => loadAndDisplay(orgIdsData), 10000);
+                    regularRefreshIntervalId = setInterval(() => {
+                        if (isTokenValid) {
+                            loadAndDisplay(orgIdsData);
+                        }
+                    }, 10000);
                 } catch (err) {
                     console.error("[ERR] Initialization failed:", err);
                     elt.querySelector("#srf-status").textContent = "✗ Error during initialization";
