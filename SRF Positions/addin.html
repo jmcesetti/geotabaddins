@@ -706,10 +706,19 @@
                 const countEl = elt.querySelector("#srf-device-count");
                 try {
                     if (!srf_isTokenValid) {
-                        statusEl.textContent = "✗ Token incorrecto o vencido";
+                        statusEl.textContent = "⚠ Token SRF inválido - mostrando MKP";
                         statusEl.classList.add("srf-error");
                         if (!srf_tokenCheckTimeoutId) {
                             srf_scheduleTokenRetry();
+                        }
+                        // Intentar mostrar dispositivos MKP aunque SRF falle
+                        if (mkp_allDevices.length > 0) {
+                            drawDevices(mkp_allDevices);
+                            renderDevicesList(mkp_allDevices);
+                            const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+                            statusEl.textContent = `✓ ${mkp_allDevices.length} MKP (sin SRF) a las ${timeStr}`;
+                            statusEl.classList.remove("srf-error");
+                            countEl.textContent = mkp_allDevices.length;
                         }
                         return;
                     }
@@ -754,10 +763,19 @@
                     console.error("[ERR]", err);
                     if (err.message === "TokenInvalid") {
                         srf_isTokenValid = false;
-                        statusEl.textContent = "✗ Token incorrecto o vencido";
+                        statusEl.textContent = "⚠ Token SRF inválido - mostrando MKP";
                         statusEl.classList.add("srf-error");
                         if (!srf_tokenCheckTimeoutId) {
                             srf_scheduleTokenRetry();
+                        }
+                        // Mostrar MKP como fallback
+                        if (mkp_allDevices.length > 0) {
+                            drawDevices(mkp_allDevices);
+                            renderDevicesList(mkp_allDevices);
+                            const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+                            statusEl.textContent = `✓ ${mkp_allDevices.length} MKP (sin SRF) a las ${timeStr}`;
+                            statusEl.classList.remove("srf-error");
+                            countEl.textContent = mkp_allDevices.length;
                         }
                     } else {
                         statusEl.textContent = `✗ ${err.message}`;
@@ -800,15 +818,16 @@
 
                 // SURFSIGHT PIPELINE
                 (async () => {
+                    let orgIdsData = null;
                     try {
                         await srf_fetchTokenFromGitHub();
-                        const orgIdsData = await srf_getOrgIdsFromGeotab();
+                        orgIdsData = await srf_getOrgIdsFromGeotab();
 
                         console.log("[SRF] Database: " + orgIdsData.database + " > srf: " + JSON.stringify(orgIdsData.allSrfIds));
 
                         loadAndDisplay(orgIdsData);
                         srf_regularRefreshIntervalId = setInterval(() => {
-                            if (srf_isTokenValid) {
+                            if (srf_isTokenValid && orgIdsData) {
                                 loadAndDisplay(orgIdsData);
                             }
                         }, 10000);
@@ -816,11 +835,20 @@
                         console.error("[SRF] Initialization failed:", err);
                         const statusEl = elt.querySelector("#srf-status");
                         if (err.message.includes("No matching OrgIds found")) {
-                            statusEl.textContent = "✗ Sin SRF Id para esta organización";
+                            statusEl.textContent = "Sin SRF Id para esta organización";
                         } else {
-                            statusEl.textContent = "✗ Error during initialization";
+                            statusEl.textContent = "Error en SRF - intentando MKP...";
                         }
                         statusEl.classList.add("srf-error");
+                        // Permitir que MKP se cargue aunque SRF falle
+                        if (mkp_allDevices.length > 0) {
+                            drawDevices(mkp_allDevices);
+                            renderDevicesList(mkp_allDevices);
+                            const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+                            statusEl.textContent = `✓ ${mkp_allDevices.length} MKP a las ${timeStr}`;
+                            statusEl.classList.remove("srf-error");
+                            elt.querySelector("#srf-device-count").textContent = mkp_allDevices.length;
+                        }
                     }
                 })();
 
