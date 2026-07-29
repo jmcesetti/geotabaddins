@@ -715,23 +715,40 @@
                     }
 
                     statusEl.textContent = "Cargando dispositivos...";
-                    allDevices = await srf_getSurfsightDevices(orgIdsData);
+                    let srf_devices = [];
+                    try {
+                        srf_devices = await srf_getSurfsightDevices(orgIdsData);
+                        srf_devices = srf_devices.map(device => {
+                            if (device.imei && mkp_snMap[device.imei]) {
+                                device.sn = mkp_snMap[device.imei];
+                            }
+                            return device;
+                        });
+                    } catch (err) {
+                        console.log("[SRF] No devices available, showing MKP only");
+                        srf_devices = [];
+                    }
 
-                    allDevices = allDevices.map(device => {
-                        if (device.imei && mkp_snMap[device.imei]) {
-                            device.sn = mkp_snMap[device.imei];
-                        }
-                        return device;
-                    });
-
-                    const srf_imeiSet = new Set(allDevices.map(d => d.imei).filter(Boolean));
+                    const srf_imeiSet = new Set(srf_devices.map(d => d.imei).filter(Boolean));
                     const mkp_onlyDevices = mkp_allDevices.filter(d => !srf_imeiSet.has(d.imei));
-                    const combinedDevices = [...allDevices, ...mkp_onlyDevices];
+                    const combinedDevices = [...srf_devices, ...mkp_onlyDevices];
+
+                    if (combinedDevices.length === 0) {
+                        statusEl.textContent = "✗ No hay dispositivos disponibles";
+                        statusEl.classList.add("srf-error");
+                        return;
+                    }
 
                     drawDevices(combinedDevices);
                     renderDevicesList(combinedDevices);
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                    statusEl.textContent = `✓ ${combinedDevices.length} dispositivos (${allDevices.length} SRF, ${mkp_onlyDevices.length} MKP) a las ${timeStr}`;
+                    const srf_count = srf_devices.length;
+                    const mkp_count = mkp_onlyDevices.length;
+                    const label = srf_count > 0 && mkp_count > 0 ? `${combinedDevices.length} (${srf_count} SRF, ${mkp_count} MKP)` :
+                                  mkp_count > 0 ? `${mkp_count} MKP` :
+                                  `${srf_count} SRF`;
+                    statusEl.textContent = `✓ ${label} a las ${timeStr}`;
+                    statusEl.classList.remove("srf-error");
                     countEl.textContent = combinedDevices.length;
                 } catch (err) {
                     console.error("[ERR]", err);
