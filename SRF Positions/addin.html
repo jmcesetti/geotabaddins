@@ -214,46 +214,48 @@
                 console.log("  - Domain:", session.domain);
                 console.log("  - UserId:", session.userId);
 
-                const api = ApiHelpers.getApi();
-                const deviceMappingsUrl = "https://media-services.geotab.com/api/DeviceMappings";
+                const backendUrl = "http://localhost:5000/api/device-mappings";
 
-                console.log(`[TEST] Enviando request a: ${deviceMappingsUrl}`);
-                console.log("[TEST] Headers personalizados:");
-                console.log("  - x-mygeotab-database:", session.database);
-                console.log("  - x-mygeotab-path:", session.domain);
-                console.log("  - x-mygeotab-sessionid: [REDACTED]");
-                console.log("  - x-mygeotab-userid:", session.userId);
-                console.log("  - x-mygeotab-username:", session.userName);
-                console.log("  - authorization: Bearer");
+                console.log(`[TEST] Enviando request a: ${backendUrl}`);
+                console.log("[TEST] Datos de sesión:");
+                console.log("  - database:", session.database);
+                console.log("  - sessionId: [REDACTED]");
+                console.log("  - userId:", session.userId);
+                console.log("  - username:", session.userName);
+                console.log("  - domain:", session.domain);
 
-                const response = await fetch(deviceMappingsUrl, {
-                    method: 'GET',
+                const response = await fetch(backendUrl, {
+                    method: 'POST',
                     headers: {
-                        'authorization': 'Bearer',
-                        'x-mygeotab-database': session.database,
-                        'x-mygeotab-path': session.domain,
-                        'x-mygeotab-sessionid': session.sessionId,
-                        'x-mygeotab-userid': session.userId,
-                        'x-mygeotab-username': session.userName
-                    }
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        database: session.database,
+                        sessionId: session.sessionId,
+                        username: session.userName,
+                        userId: session.userId,
+                        domain: session.domain
+                    })
                 });
 
                 console.log("[TEST] Respuesta recibida:");
                 console.log("  - Status:", response.status);
                 console.log("  - StatusText:", response.statusText);
-                console.log("  - Headers:");
-                Array.from(response.headers.entries()).forEach(([key, value]) => {
-                    console.log(`    - ${key}: ${value}`);
-                });
 
                 const data = await response.json();
                 console.log("[TEST] JSON parsed:");
-                console.log("  - Tipo:", typeof data);
-                console.log("  - Es Array:", Array.isArray(data));
-                console.log("  - Largo:", Array.isArray(data) ? data.length : Object.keys(data).length);
-                console.log("  - Datos completos:", data);
+                console.log("  - Success:", data.success);
+                console.log("  - Geotab Status:", data.status);
+                console.log("  - Data:");
+                console.log(data.data);
+                if (data.error) {
+                    console.log("  - Error:", data.error);
+                }
 
-                return { success: true, data };
+                console.log("[TEST] Datos completos devueltos:");
+                console.log(data);
+
+                return { success: data.success, data: data.data, geotabStatus: data.status };
             } catch (err) {
                 console.error("[TEST] ERROR:", err.message);
                 console.error("[TEST] Stack:", err.stack);
