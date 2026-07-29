@@ -22,12 +22,12 @@
             }
         }
 
-        let token = null;
-        let isTokenValid = true;
-        let tokenCheckTimeoutId = null;
-        let regularRefreshIntervalId = null;
-        const tokenRetryDelays = [60000, 180000, 300000, 600000];
-        let tokenRetryIndex = 0;
+        let srf_token = null;
+        let srf_isTokenValid = true;
+        let srf_tokenCheckTimeoutId = null;
+        let srf_regularRefreshIntervalId = null;
+        const srf_tokenRetryDelays = [60000, 180000, 300000, 600000];
+        let srf_tokenRetryIndex = 0;
 
         const ApiHelpers = (() => {
             let _api = null;
@@ -61,19 +61,19 @@
         })();
 
         // ====== SURFSIGHT PIPELINE ======
-        async function fetchTokenFromGitHub() {
+        async function srf_fetchTokenFromGitHub() {
             try {
                 const response = await fetch('https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/token.txt');
                 if (!response.ok) throw new Error(`Failed to fetch token: ${response.statusText}`);
-                token = (await response.text()).trim();
-                return token;
+                srf_token = (await response.text()).trim();
+                return srf_token;
             } catch (err) {
-                console.error("[ERR] Fetching token:", err);
+                console.error("[SRF] Fetching token:", err);
                 throw err;
             }
         }
 
-        async function getUnionsFromGitHub() {
+        async function srf_getUnionsFromGitHub() {
             try {
                 const url = "https://raw.githubusercontent.com/jmcesetti/geotabaddins/main/SRF%20Positions/unions.csv";
                 const response = await fetch(url);
@@ -95,15 +95,15 @@
 
                 return unions;
             } catch (err) {
-                console.error("[ERR] Fetching unions.csv:", err);
+                console.error("[SRF] Fetching unions.csv:", err);
                 throw err;
             }
         }
 
-        async function getOrgIdsFromGeotab() {
+        async function srf_getOrgIdsFromGeotab() {
             try {
                 const session = await ApiHelpers.getSessionPromise();
-                const unions = await getUnionsFromGitHub();
+                const unions = await srf_getUnionsFromGitHub();
                 const database = session.database;
 
                 const matchingUnions = unions.filter(u => u.geotab_db && u.geotab_db.toLowerCase() === database.toLowerCase());
@@ -123,20 +123,20 @@
             }
         }
 
-        async function getDevicesByOrgId(orgId) {
-            if (!token) await fetchTokenFromGitHub();
+        async function srf_getDevicesByOrgId(orgId) {
+            if (!srf_token) await srf_fetchTokenFromGitHub();
             try {
                 const url = `https://api-prod.surfsight.net/v2/organizations/${orgId}/devices`;
 
                 const response = await fetch(url, {
                     headers: {
-                        'Authorization': `Bearer ${token}`,
+                        'Authorization': `Bearer ${srf_token}`,
                         'Content-Type': 'application/json'
                     }
                 });
 
                 if (response.status === 401) {
-                    isTokenValid = false;
+                    srf_isTokenValid = false;
                     console.log("[SRF] Token inválido");
                     throw new Error("TokenInvalid");
                 }
@@ -152,13 +152,13 @@
             }
         }
 
-        async function checkTokenValidity() {
+        async function srf_checkTokenValidity() {
             try {
-                await fetchTokenFromGitHub();
+                await srf_fetchTokenFromGitHub();
                 const testUrl = 'https://api-prod.surfsight.net/v2/organizations/test';
                 const response = await fetch(testUrl, {
                     headers: {
-                        'Authorization': `Bearer ${token}`,
+                        'Authorization': `Bearer ${srf_token}`,
                         'Content-Type': 'application/json'
                     }
                 });
@@ -168,18 +168,18 @@
             }
         }
 
-        function scheduleTokenRetry() {
-            if (tokenCheckTimeoutId) clearTimeout(tokenCheckTimeoutId);
+        function srf_scheduleTokenRetry() {
+            if (srf_tokenCheckTimeoutId) clearTimeout(srf_tokenCheckTimeoutId);
 
-            const delay = tokenRetryDelays[Math.min(tokenRetryIndex, tokenRetryDelays.length - 1)];
+            const delay = srf_tokenRetryDelays[Math.min(srf_tokenRetryIndex, srf_tokenRetryDelays.length - 1)];
             const delayMin = delay / 60000;
             console.log(`[SRF] Reintentando token en ${delayMin}m...`);
 
-            tokenCheckTimeoutId = setTimeout(async () => {
-                const isValid = await checkTokenValidity();
+            srf_tokenCheckTimeoutId = setTimeout(async () => {
+                const isValid = await srf_checkTokenValidity();
                 if (isValid) {
-                    isTokenValid = true;
-                    tokenRetryIndex = 0;
+                    srf_isTokenValid = true;
+                    srf_tokenRetryIndex = 0;
                     console.log("[SRF] Token válido nuevamente. Reanudando carga de dispositivos...");
                     if (elt && elt.querySelector("#srf-status")) {
                         elt.querySelector("#srf-status").textContent = "Inicializando...";
@@ -187,22 +187,22 @@
                     }
                     ApiHelpers.getSessionPromise().then(async () => {
                         try {
-                            const orgIdsData = await getOrgIdsFromGeotab();
+                            const orgIdsData = await srf_getOrgIdsFromGeotab();
                             loadAndDisplay(orgIdsData);
                         } catch (err) {
                             console.error("[ERR] Error reloading after token fix:", err);
                         }
                     });
                 } else {
-                    tokenRetryIndex++;
-                    scheduleTokenRetry();
+                    srf_tokenRetryIndex++;
+                    srf_scheduleTokenRetry();
                 }
             }, delay);
         }
 
-        async function getSurfsightDevices(orgIdsData) {
+        async function srf_getSurfsightDevices(orgIdsData) {
             try {
-                const devicePromises = orgIdsData.orgIdsFromCsv.map(orgId => getDevicesByOrgId(orgId));
+                const devicePromises = orgIdsData.orgIdsFromCsv.map(orgId => srf_getDevicesByOrgId(orgId));
                 const allDevicesArrays = await Promise.all(devicePromises);
                 const allDevices = allDevicesArrays.flat();
 
@@ -215,10 +215,13 @@
         }
 
         // ====== MARKETPLACE PIPELINE ======
-        let marketplaceDeviceMappings = [];
-        let marketplaceRefreshIntervalId = null;
+        let mkp_deviceMappings = [];
+        let mkp_validDevices = [];
+        let mkp_snMap = {};
+        let mkp_allDevices = [];
+        let mkp_refreshIntervalId = null;
 
-        async function getMarketplaceDeviceMappings() {
+        async function mkp_getDeviceMappings() {
             try {
                 const session = await ApiHelpers.getSessionPromise();
                 const response = await fetch("https://media-services.geotab.com/api/DeviceMappings", {
@@ -236,22 +239,22 @@
                 const data = await response.json();
                 const items = Array.isArray(data) ? data : (data.data || []);
 
-                marketplaceDeviceMappings = items
+                mkp_deviceMappings = items
                     .filter(item => item.associatedDeviceSerialNumber && item.partnerDeviceId)
                     .map(item => ({
                         sn: item.associatedDeviceSerialNumber,
                         imei: item.partnerDeviceId
                     }));
 
-                console.log(`[MKP] DeviceMappings cargados: ${marketplaceDeviceMappings.length} dispositivos`);
-                return marketplaceDeviceMappings;
+                console.log(`[MKP] DeviceMappings cargados: ${mkp_deviceMappings.length} dispositivos`);
+                return mkp_deviceMappings;
             } catch (err) {
-                console.error("[ERR] getMarketplaceDeviceMappings:", err);
+                console.error("[ERR] mkp_getDeviceMappings:", err);
                 return [];
             }
         }
 
-        async function fetchMarketplaceDeviceByImei(imei) {
+        async function mkp_fetchDeviceByImei(imei) {
             try {
                 const url = `https://media-services.geotab.com/api/Surfsight/OrganizationDevices/${imei}`;
                 const session = await ApiHelpers.getSessionPromise();
@@ -279,27 +282,68 @@
             }
         }
 
-        async function refreshMarketplaceData() {
-            if (marketplaceDeviceMappings.length === 0) return;
+        async function mkp_refreshData() {
+            if (mkp_validDevices.length === 0) return;
             const results = await Promise.all(
-                marketplaceDeviceMappings.map(mapping =>
-                    fetchMarketplaceDeviceByImei(mapping.imei).then(data => ({
+                mkp_validDevices.map(device =>
+                    mkp_fetchDeviceByImei(device.imei).then(data => ({
+                        sn: device.sn,
+                        imei: device.imei,
+                        data
+                    }))
+                )
+            );
+            mkp_allDevices = results.filter(r => r.data).map(r => ({
+                sn: r.sn,
+                imei: r.imei,
+                name: r.data.deviceModel || `MKP-${r.imei}`,
+                lat: r.data.lat,
+                lon: r.data.lon,
+                speed: Math.round(r.data.speed),
+                status: r.data.status,
+                lastSeenOnline: r.data.lastSeenOnline
+            }));
+            console.log(`[MKP] Refresh: ${mkp_allDevices.length}/${results.length} OK`);
+            mkp_allDevices.forEach(device => {
+                console.log(`[MKP] IMEI ${device.imei} (SN: ${device.sn}): speed=${device.speed}km/h, status=${device.status}`);
+            });
+            return mkp_allDevices;
+        }
+
+        async function mkp_initValidDevices() {
+            if (mkp_deviceMappings.length === 0) return;
+            const results = await Promise.all(
+                mkp_deviceMappings.map(mapping =>
+                    mkp_fetchDeviceByImei(mapping.imei).then(data => ({
                         sn: mapping.sn,
                         imei: mapping.imei,
                         data
                     }))
                 )
             );
-            console.log(`[MKP] Refresh: ${results.filter(r => r.data).length}/${results.length} OK`);
-            results.forEach(result => {
-                if (result.data) {
-                    console.log(`[MKP] IMEI ${result.imei} (SN: ${result.sn}):`, result.data);
-                }
+            mkp_validDevices = results.filter(r => r.data).map(r => ({ sn: r.sn, imei: r.imei }));
+            mkp_snMap = {};
+            mkp_validDevices.forEach(device => {
+                mkp_snMap[device.imei] = device.sn;
+            });
+            mkp_allDevices = results.filter(r => r.data).map(r => ({
+                sn: r.sn,
+                imei: r.imei,
+                name: r.data.deviceModel || `MKP-${r.imei}`,
+                lat: r.data.lat,
+                lon: r.data.lon,
+                speed: Math.round(r.data.speed),
+                status: r.data.status,
+                lastSeenOnline: r.data.lastSeenOnline
+            }));
+            console.log(`[MKP] Valid devices: ${mkp_validDevices.length}/${results.length}`);
+            mkp_allDevices.forEach(device => {
+                console.log(`[MKP] IMEI ${device.imei} (SN: ${device.sn}): speed=${device.speed}km/h, status=${device.status}`);
             });
             return results;
         }
 
-        async function testMarketplaceRequest() {
+        async function mkp_testRequest() {
             try {
                 console.log("[TEST] Iniciando prueba de DeviceMappings...");
                 const session = await ApiHelpers.getSessionPromise();
@@ -646,7 +690,7 @@
                     testBtn.style.opacity = '0.6';
                     testBtn.textContent = '⏳ Probando...';
                     console.log("[TEST] ========== INICIANDO PRUEBA ==========");
-                    const result = await testMarketplaceRequest();
+                    const result = await mkp_testRequest();
                     console.log("[TEST] ========== PRUEBA FINALIZADA ==========");
                     testBtn.disabled = false;
                     testBtn.style.opacity = '1';
@@ -661,30 +705,42 @@
                 const statusEl = elt.querySelector("#srf-status");
                 const countEl = elt.querySelector("#srf-device-count");
                 try {
-                    if (!isTokenValid) {
+                    if (!srf_isTokenValid) {
                         statusEl.textContent = "✗ Token incorrecto o vencido";
                         statusEl.classList.add("srf-error");
-                        if (!tokenCheckTimeoutId) {
-                            scheduleTokenRetry();
+                        if (!srf_tokenCheckTimeoutId) {
+                            srf_scheduleTokenRetry();
                         }
                         return;
                     }
 
                     statusEl.textContent = "Cargando dispositivos...";
-                    allDevices = await getSurfsightDevices(orgIdsData);
-                    drawDevices(allDevices);
-                    renderDevicesList(allDevices);
+                    allDevices = await srf_getSurfsightDevices(orgIdsData);
+
+                    allDevices = allDevices.map(device => {
+                        if (device.imei && mkp_snMap[device.imei]) {
+                            device.sn = mkp_snMap[device.imei];
+                        }
+                        return device;
+                    });
+
+                    const srf_imeiSet = new Set(allDevices.map(d => d.imei).filter(Boolean));
+                    const mkp_onlyDevices = mkp_allDevices.filter(d => !srf_imeiSet.has(d.imei));
+                    const combinedDevices = [...allDevices, ...mkp_onlyDevices];
+
+                    drawDevices(combinedDevices);
+                    renderDevicesList(combinedDevices);
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                    statusEl.textContent = `✓ ${allDevices.length} dispositivos a las ${timeStr}`;
-                    countEl.textContent = allDevices.length;
+                    statusEl.textContent = `✓ ${combinedDevices.length} dispositivos (${allDevices.length} SRF, ${mkp_onlyDevices.length} MKP) a las ${timeStr}`;
+                    countEl.textContent = combinedDevices.length;
                 } catch (err) {
                     console.error("[ERR]", err);
                     if (err.message === "TokenInvalid") {
-                        isTokenValid = false;
+                        srf_isTokenValid = false;
                         statusEl.textContent = "✗ Token incorrecto o vencido";
                         statusEl.classList.add("srf-error");
-                        if (!tokenCheckTimeoutId) {
-                            scheduleTokenRetry();
+                        if (!srf_tokenCheckTimeoutId) {
+                            srf_scheduleTokenRetry();
                         }
                     } else {
                         statusEl.textContent = `✗ ${err.message}`;
@@ -728,14 +784,14 @@
                 // SURFSIGHT PIPELINE
                 (async () => {
                     try {
-                        await fetchTokenFromGitHub();
-                        const orgIdsData = await getOrgIdsFromGeotab();
+                        await srf_fetchTokenFromGitHub();
+                        const orgIdsData = await srf_getOrgIdsFromGeotab();
 
                         console.log("[SRF] Database: " + orgIdsData.database + " > srf: " + JSON.stringify(orgIdsData.allSrfIds));
 
                         loadAndDisplay(orgIdsData);
-                        regularRefreshIntervalId = setInterval(() => {
-                            if (isTokenValid) {
+                        srf_regularRefreshIntervalId = setInterval(() => {
+                            if (srf_isTokenValid) {
                                 loadAndDisplay(orgIdsData);
                             }
                         }, 10000);
@@ -754,10 +810,10 @@
                 // MARKETPLACE PIPELINE
                 (async () => {
                     try {
-                        await getMarketplaceDeviceMappings();
-                        refreshMarketplaceData();
-                        marketplaceRefreshIntervalId = setInterval(() => {
-                            refreshMarketplaceData();
+                        await mkp_getDeviceMappings();
+                        await mkp_initValidDevices();
+                        mkp_refreshIntervalId = setInterval(() => {
+                            mkp_refreshData();
                         }, 30000);
                     } catch (err) {
                         console.error("[MKP] Initialization failed:", err);
