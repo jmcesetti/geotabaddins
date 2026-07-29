@@ -28,6 +28,7 @@
         let srf_regularRefreshIntervalId = null;
         const srf_tokenRetryDelays = [60000, 180000, 300000, 600000];
         let srf_tokenRetryIndex = 0;
+        let mkp_initPromise = null;
 
         const ApiHelpers = (() => {
             let _api = null;
@@ -40,7 +41,7 @@
                     _session = session;
                     return session;
                 }).catch(err => {
-                    console.error("[ERR] Error loading session:", err);
+                    console.error("[Session] Error loading session:", err.message);
                     throw err;
                 });
             }
@@ -68,7 +69,7 @@
                 srf_token = (await response.text()).trim();
                 return srf_token;
             } catch (err) {
-                console.error("[SRF] Fetching token:", err);
+                console.error("[SRF]", err.message);
                 throw err;
             }
         }
@@ -95,7 +96,7 @@
 
                 return unions;
             } catch (err) {
-                console.error("[SRF] Fetching unions.csv:", err);
+                console.error("[SRF]", err.message);
                 throw err;
             }
         }
@@ -118,7 +119,7 @@
 
                 return { database, orgIdsFromCsv, allSrfIds };
             } catch (err) {
-                console.error("[ERR] Getting OrgIds:", err);
+                console.error("[SRF]", err.message);
                 throw err;
             }
         }
@@ -137,7 +138,7 @@
 
                 if (response.status === 401) {
                     srf_isTokenValid = false;
-                    console.log("[SRF] Token inválido");
+                    console.error("[SRF] Token inválido");
                     throw new Error("TokenInvalid");
                 }
 
@@ -147,7 +148,7 @@
                 const devices = devicesData.data || (Array.isArray(devicesData) ? devicesData : []);
                 return devices;
             } catch (err) {
-                console.error("[SRF] ERROR fetching devices:", err);
+                console.error("[SRF]", err.message);
                 throw err;
             }
         }
@@ -180,7 +181,7 @@
                 if (isValid) {
                     srf_isTokenValid = true;
                     srf_tokenRetryIndex = 0;
-                    console.log("[SRF] Token válido nuevamente. Reanudando carga de dispositivos...");
+                    console.log("[SRF] Token válido nuevamente");
                     if (elt && elt.querySelector("#srf-status")) {
                         elt.querySelector("#srf-status").textContent = "Inicializando...";
                         elt.querySelector("#srf-status").classList.remove("srf-error");
@@ -190,7 +191,7 @@
                             const orgIdsData = await srf_getOrgIdsFromGeotab();
                             loadAndDisplay(orgIdsData);
                         } catch (err) {
-                            console.error("[ERR] Error reloading after token fix:", err);
+                            console.error("[SRF]", err.message);
                         }
                     });
                 } else {
@@ -205,8 +206,6 @@
                 const devicePromises = orgIdsData.orgIdsFromCsv.map(orgId => srf_getDevicesByOrgId(orgId));
                 const allDevicesArrays = await Promise.all(devicePromises);
                 const allDevices = allDevicesArrays.flat();
-
-                console.log("[SRF] Total devices loaded:", allDevices.length);
                 return allDevices;
             } catch (err) {
                 console.error("[ERR] In getSurfsightDevices:", err);
@@ -246,7 +245,6 @@
                         imei: item.partnerDeviceId
                     }));
 
-                console.log(`[MKP] DeviceMappings cargados: ${mkp_deviceMappings.length} dispositivos`);
                 return mkp_deviceMappings;
             } catch (err) {
                 console.error("[ERR] mkp_getDeviceMappings:", err);
@@ -269,15 +267,13 @@
                 });
 
                 if (!response.ok) {
-                    console.warn(`[MKP] IMEI ${imei} responded ${response.status}`);
                     return null;
                 }
 
                 const data = await response.json();
-                console.log(`[MKP] Response IMEI ${imei}:`, data);
                 return data;
             } catch (err) {
-                console.warn(`[MKP] fetchMarketplaceDeviceByImei(${imei}) failed:`, err.message);
+                console.error(`[MKP] fetchMarketplaceDeviceByImei failed:`, err.message);
                 return null;
             }
         }
@@ -304,9 +300,6 @@
                 lastSeenOnline: r.data.lastSeenOnline
             }));
             console.log(`[MKP] Refresh: ${mkp_allDevices.length}/${results.length} OK`);
-            mkp_allDevices.forEach(device => {
-                console.log(`[MKP] IMEI ${device.imei} (SN: ${device.sn}): speed=${device.speed}km/h, status=${device.status}`);
-            });
             return mkp_allDevices;
         }
 
@@ -336,33 +329,13 @@
                 status: r.data.status,
                 lastSeenOnline: r.data.lastSeenOnline
             }));
-            console.log(`[MKP] Valid devices: ${mkp_validDevices.length}/${results.length}`);
-            mkp_allDevices.forEach(device => {
-                console.log(`[MKP] IMEI ${device.imei} (SN: ${device.sn}): speed=${device.speed}km/h, status=${device.status}`);
-            });
             return results;
         }
 
         async function mkp_testRequest() {
             try {
-                console.log("[TEST] Iniciando prueba de DeviceMappings...");
                 const session = await ApiHelpers.getSessionPromise();
-
-                console.log("[TEST] Sesión obtenida:");
-                console.log("  - Database:", session.database);
-                console.log("  - Username:", session.userName);
-                console.log("  - SessionId:", session.sessionId);
-                console.log("  - Domain:", session.domain);
-
-                const api = ApiHelpers.getApi();
                 const deviceMappingsUrl = "https://media-services.geotab.com/api/DeviceMappings";
-
-                console.log(`[TEST] Enviando request a: ${deviceMappingsUrl}`);
-                console.log("[TEST] Headers personalizados:");
-                console.log("  - x-mygeotab-database:", session.database);
-                console.log("  - x-mygeotab-path:", session.domain);
-                console.log("  - x-mygeotab-sessionid: [REDACTED]");
-                console.log("  - x-mygeotab-username:", session.userName);
 
                 const response = await fetch(deviceMappingsUrl, {
                     method: 'GET',
@@ -374,25 +347,10 @@
                     }
                 });
 
-                console.log("[TEST] Respuesta recibida:");
-                console.log("  - Status:", response.status);
-                console.log("  - StatusText:", response.statusText);
-                console.log("  - Headers:");
-                Array.from(response.headers.entries()).forEach(([key, value]) => {
-                    console.log(`    - ${key}: ${value}`);
-                });
-
                 const data = await response.json();
-                console.log("[TEST] JSON parsed:");
-                console.log("  - Tipo:", typeof data);
-                console.log("  - Es Array:", Array.isArray(data));
-                console.log("  - Largo:", Array.isArray(data) ? data.length : Object.keys(data).length);
-                console.log("  - Datos completos:", data);
-
                 return { success: true, data };
             } catch (err) {
                 console.error("[TEST] ERROR:", err.message);
-                console.error("[TEST] Stack:", err.stack);
                 return { success: false, error: err.message };
             }
         }
@@ -733,6 +691,7 @@
                             }
                             return device;
                         });
+                        console.log(`[SRF] Refresh: ${srf_devices.length}/${srf_devices.length} OK`);
                     } catch (err) {
                         console.log("[SRF] No devices available, showing MKP only");
                         srf_devices = [];
@@ -823,8 +782,6 @@
                         await srf_fetchTokenFromGitHub();
                         orgIdsData = await srf_getOrgIdsFromGeotab();
 
-                        console.log("[SRF] Database: " + orgIdsData.database + " > srf: " + JSON.stringify(orgIdsData.allSrfIds));
-
                         loadAndDisplay(orgIdsData);
                         srf_regularRefreshIntervalId = setInterval(() => {
                             if (srf_isTokenValid && orgIdsData) {
@@ -832,7 +789,7 @@
                             }
                         }, 10000);
                     } catch (err) {
-                        console.error("[SRF] Initialization failed:", err);
+                        console.error("[SRF] Initialization:", err.message);
                         const statusEl = elt.querySelector("#srf-status");
                         if (err.message.includes("No matching OrgIds found")) {
                             statusEl.textContent = "Sin SRF Id para esta organización";
@@ -840,20 +797,26 @@
                             statusEl.textContent = "Error en SRF - intentando MKP...";
                         }
                         statusEl.classList.add("srf-error");
-                        // Permitir que MKP se cargue aunque SRF falle
-                        if (mkp_allDevices.length > 0) {
-                            drawDevices(mkp_allDevices);
-                            renderDevicesList(mkp_allDevices);
-                            const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                            statusEl.textContent = `✓ ${mkp_allDevices.length} MKP a las ${timeStr}`;
-                            statusEl.classList.remove("srf-error");
-                            elt.querySelector("#srf-device-count").textContent = mkp_allDevices.length;
+
+                        // Esperar a que MKP termine de inicializarse antes de mostrar fallback
+                        try {
+                            await mkp_initPromise;
+                            if (mkp_allDevices.length > 0) {
+                                drawDevices(mkp_allDevices);
+                                renderDevicesList(mkp_allDevices);
+                                const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+                                statusEl.textContent = `✓ ${mkp_allDevices.length} MKP a las ${timeStr}`;
+                                statusEl.classList.remove("srf-error");
+                                elt.querySelector("#srf-device-count").textContent = mkp_allDevices.length;
+                            }
+                        } catch (mkpErr) {
+                            console.error("[MKP] Fallback:", mkpErr.message);
                         }
                     }
                 })();
 
                 // MARKETPLACE PIPELINE
-                (async () => {
+                mkp_initPromise = (async () => {
                     try {
                         await mkp_getDeviceMappings();
                         await mkp_initValidDevices();
@@ -866,13 +829,13 @@
                 })();
 
             }).catch(err => {
-                console.error("[ERR] Failed to load session:", err);
+                console.error("[Session]", err.message);
                 elt.querySelector("#srf-status").textContent = "✗ Error loading session";
             });
         };
 
         getLastCommitMessage().then(() => {
-            console.log("[SRF] Script loaded successfully (" + commitMessage + ")");
+            console.log("[APP] Script loaded");
         });
     </script>
 </body>
