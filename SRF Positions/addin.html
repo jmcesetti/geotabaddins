@@ -69,7 +69,7 @@
             async function getDevices() {
                 console.log("[LINK] Iniciando getDevices...");
                 return new Promise((resolve, reject) => {
-                    _api.api.get('Device', null,
+                    _api.get('Device', null,
                         result => {
                             console.log("[LINK] getDevices completado, cantidad:", result.length);
                             resolve(result);
