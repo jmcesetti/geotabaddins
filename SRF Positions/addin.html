@@ -57,7 +57,41 @@
                 return _sessionPromise;
             }
 
-            return { init, getApi, getSession, getSessionPromise };
+            function call(method, params) {
+                return new Promise((resolve, reject) => {
+                    _api.api.call(method, params,
+                        result => resolve(result),
+                        err => reject(err)
+                    );
+                });
+            }
+
+            async function getDevices() {
+                return call('Get', {
+                    typeName: 'Device',
+                    resultsLimit: 500
+                });
+            }
+
+            async function getDeviceMappings() {
+                if (!_session) await getSessionPromise();
+                const deviceMappingsUrl = "https://media-services.geotab.com/api/DeviceMappings";
+
+                const response = await fetch(deviceMappingsUrl, {
+                    method: 'GET',
+                    headers: {
+                        'x-mygeotab-database': encodeURIComponent(_session.database),
+                        'x-mygeotab-path': _session.domain,
+                        'x-mygeotab-sessionid': _session.sessionId,
+                        'x-mygeotab-username': _session.userName
+                    }
+                });
+
+                if (!response.ok) throw new Error(`DeviceMappings error: ${response.status}`);
+                return response.json();
+            }
+
+            return { init, getApi, getSession, getSessionPromise, call, getDevices, getDeviceMappings };
         })();
 
         async function fetchTokenFromGitHub() {
@@ -271,6 +305,57 @@
             }
         }
 
+        async function enrichDevicesWithGeotabData() {
+            try {
+                console.log("[LINK] Obteniendo datos de Geotab y DeviceMappings...");
+
+                const geotabDevices = await ApiHelpers.getDevices();
+                console.log("[LINK] Geotab devices:", geotabDevices.length);
+
+                const deviceMappings = await ApiHelpers.getDeviceMappings();
+                console.log("[LINK] DeviceMappings:", deviceMappings.length);
+
+                const srfDevices = await getDevices(await getOrgIdsFromGeotab());
+                console.log("[LINK] Surfsight devices:", srfDevices.length);
+
+                const gtbMap = {};
+                geotabDevices.forEach(d => {
+                    gtbMap[d.serialNumber?.toLowerCase()] = d;
+                });
+
+                const mappingMap = {};
+                deviceMappings.forEach(m => {
+                    mappingMap[m.partnerDeviceId] = m;
+                });
+
+                const enriched = srfDevices.map(srfDevice => {
+                    const mapping = mappingMap[srfDevice.imei];
+                    const gtbDevice = mapping ? gtbMap[mapping.associatedDeviceSerialNumber?.toLowerCase()] : null;
+
+                    return {
+                        ...srfDevice,
+                        gtbName: gtbDevice?.name || srfDevice.name,
+                        gtbLicensePlate: gtbDevice?.licensePlate || 'N/A',
+                        gtbId: gtbDevice?.id || null,
+                        mappingId: mapping?.deviceMappingId || null,
+                        isLinked: !!gtbDevice
+                    };
+                });
+
+                console.log("[LINK] Devices enriquecidos:", enriched.length);
+                enriched.forEach(d => {
+                    if (d.isLinked) {
+                        console.log(`[LINK] ${d.name} → ${d.gtbName} (${d.gtbLicensePlate})`);
+                    }
+                });
+
+                return enriched;
+            } catch (err) {
+                console.error("[LINK] Error enriching devices:", err);
+                throw err;
+            }
+        }
+
         geotab.addin.srfPositions = function (elt, service) {
             ApiHelpers.init(service);
             let circles = [];
@@ -347,8 +432,9 @@
                             service.tooltip.showAt(
                                 coords,
                                 {
-                                    main: device.name,
+                                    main: device.gtbName || device.name,
                                     secondary: [
+                                        device.gtbLicensePlate || 'N/A',
                                         getStatusDisplay(device.status),
                                         formatDeviceDate(device.lastSeenOnline),
                                         speed + " km/h"
@@ -458,9 +544,10 @@
                         const locationStyle = (device.lat && device.lon) ? 'color:#065f46;' : 'color:#dc2626;';
 
                         row.innerHTML = `
-                            <div style="font-weight:700; font-size:14px; color:#1f2937; margin-bottom:8px; letter-spacing:-0.3px;">${device.name}</div>
+                            <div style="font-weight:700; font-size:14px; color:#1f2937; margin-bottom:8px; letter-spacing:-0.3px;">${device.gtbName || device.name}</div>
                             <div style="font-size:12px; color:#6b7280; line-height:1.6;">
-                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span><br>
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span>
+                                <span style="font-size:11px; color:#666; margin-left:8px;">${device.gtbLicensePlate || 'N/A'}</span><br>
                                 <strong style="color:#374151; font-weight:600;">Última comunicación:</strong> ${dateFormatted}<br>
                                 <strong style="color:#374151; font-weight:600;">Velocidad:</strong> ${speed} km/h<br>
                                 <span style="font-size:11px; ${locationStyle}">${locationStatus}</span>
@@ -591,7 +678,7 @@
                     }
 
                     statusEl.textContent = "Cargando dispositivos...";
-                    allDevices = await getDevices(orgIdsData);
+                    allDevices = await enrichDevicesWithGeotabData();
                     drawDevices(allDevices);
                     renderDevicesList(allDevices);
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
