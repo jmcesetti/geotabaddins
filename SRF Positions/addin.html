@@ -723,38 +723,47 @@
             `;
 
             ApiHelpers.getSessionPromise().then(async () => {
-                try {
-                    setupEventListeners();
-                    await fetchTokenFromGitHub();
-                    const orgIdsData = await getOrgIdsFromGeotab();
+                setupEventListeners();
 
-                    console.log("[SRF] Database: " + orgIdsData.database + " > srf: " + JSON.stringify(orgIdsData.allSrfIds));
+                // SURFSIGHT PIPELINE
+                (async () => {
+                    try {
+                        await fetchTokenFromGitHub();
+                        const orgIdsData = await getOrgIdsFromGeotab();
 
-                    // SURFSIGHT PIPELINE
-                    loadAndDisplay(orgIdsData);
-                    regularRefreshIntervalId = setInterval(() => {
-                        if (isTokenValid) {
-                            loadAndDisplay(orgIdsData);
+                        console.log("[SRF] Database: " + orgIdsData.database + " > srf: " + JSON.stringify(orgIdsData.allSrfIds));
+
+                        loadAndDisplay(orgIdsData);
+                        regularRefreshIntervalId = setInterval(() => {
+                            if (isTokenValid) {
+                                loadAndDisplay(orgIdsData);
+                            }
+                        }, 10000);
+                    } catch (err) {
+                        console.error("[SRF] Initialization failed:", err);
+                        const statusEl = elt.querySelector("#srf-status");
+                        if (err.message.includes("No matching OrgIds found")) {
+                            statusEl.textContent = "✗ Sin SRF Id para esta organización";
+                        } else {
+                            statusEl.textContent = "✗ Error during initialization";
                         }
-                    }, 10000);
-
-                    // MARKETPLACE PIPELINE
-                    await getMarketplaceDeviceMappings();
-                    refreshMarketplaceData();
-                    marketplaceRefreshIntervalId = setInterval(() => {
-                        refreshMarketplaceData();
-                    }, 30000);
-
-                } catch (err) {
-                    console.error("[ERR] Initialization failed:", err);
-                    const statusEl = elt.querySelector("#srf-status");
-                    if (err.message.includes("No matching OrgIds found")) {
-                        statusEl.textContent = "✗ Sin Id para esta organización";
-                    } else {
-                        statusEl.textContent = "✗ Error during initialization";
+                        statusEl.classList.add("srf-error");
                     }
-                    statusEl.classList.add("srf-error");
-                }
+                })();
+
+                // MARKETPLACE PIPELINE
+                (async () => {
+                    try {
+                        await getMarketplaceDeviceMappings();
+                        refreshMarketplaceData();
+                        marketplaceRefreshIntervalId = setInterval(() => {
+                            refreshMarketplaceData();
+                        }, 30000);
+                    } catch (err) {
+                        console.error("[MKP] Initialization failed:", err);
+                    }
+                })();
+
             }).catch(err => {
                 console.error("[ERR] Failed to load session:", err);
                 elt.querySelector("#srf-status").textContent = "✗ Error loading session";
