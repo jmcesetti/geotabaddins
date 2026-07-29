@@ -67,10 +67,18 @@
             }
 
             async function getDevices() {
-                return call('Get', {
-                    typeName: 'Device',
-                    resultsLimit: 500
-                });
+                console.log("[LINK] Iniciando getDevices...");
+                try {
+                    const result = await call('Get', {
+                        typeName: 'Device',
+                        resultsLimit: 500
+                    });
+                    console.log("[LINK] getDevices completado, cantidad:", result.length);
+                    return result;
+                } catch (err) {
+                    console.error("[LINK] Error en getDevices:", err);
+                    throw err;
+                }
             }
 
             async function getDeviceMappings() {
