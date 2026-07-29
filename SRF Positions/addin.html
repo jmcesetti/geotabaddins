@@ -68,17 +68,18 @@
 
             async function getDevices() {
                 console.log("[LINK] Iniciando getDevices...");
-                try {
-                    const result = await call('Get', {
-                        typeName: 'Device',
-                        resultsLimit: 500
-                    });
-                    console.log("[LINK] getDevices completado, cantidad:", result.length);
-                    return result;
-                } catch (err) {
-                    console.error("[LINK] Error en getDevices:", err);
-                    throw err;
-                }
+                return new Promise((resolve, reject) => {
+                    _api.api.get('Device', null,
+                        result => {
+                            console.log("[LINK] getDevices completado, cantidad:", result.length);
+                            resolve(result);
+                        },
+                        err => {
+                            console.error("[LINK] Error en getDevices:", err);
+                            reject(err);
+                        }
+                    );
+                });
             }
 
             async function getDeviceMappings() {
