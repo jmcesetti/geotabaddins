@@ -224,9 +224,9 @@
                 console.log("  - x-mygeotab-username:", session.userName);
 
                 const response = await fetch(deviceMappingsUrl, {
-                    method: 'POST',
+                    method: 'GET',
                     headers: {
-                        'x-mygeotab-database': session.database,
+                        'x-mygeotab-database': encodeURIComponent(session.database),
                         'x-mygeotab-path': session.domain,
                         'x-mygeotab-sessionid': session.sessionId,
                         'x-mygeotab-username': session.userName
