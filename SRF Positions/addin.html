@@ -309,6 +309,9 @@
             try {
                 console.log("[LINK] Cargando datos estáticos de Geotab y DeviceMappings (una sola vez)...");
 
+                await ApiHelpers.getSessionPromise();
+                console.log("[LINK] Sesión Geotab lista");
+
                 geotabDevicesCache = await ApiHelpers.getDevices();
                 console.log("[LINK] Geotab devices cached:", geotabDevicesCache.length);
 
