@@ -290,7 +290,7 @@
             }
         }
 
-        async function getDevices(orgIdsData) {
+        async function getSurfsightDevices(orgIdsData) {
             try {
                 const allOrgIds = [...orgIdsData.orgIdsFromCsv, ...orgIdsData.orgIdsFromGeo];
                 const devicePromises = allOrgIds.map(orgId => getDevicesByOrgId(orgId));
@@ -300,60 +300,53 @@
                 // console.log("[SRF] Total devices:", allDevices.length);
                 return allDevices;
             } catch (err) {
-                console.error("[ERR] In getDevices:", err);
+                console.error("[ERR] In getSurfsightDevices:", err);
                 throw err;
             }
         }
 
-        async function enrichDevicesWithGeotabData() {
+        async function loadGeotabDataOnce() {
             try {
-                console.log("[LINK] Obteniendo datos de Geotab y DeviceMappings...");
+                console.log("[LINK] Cargando datos estáticos de Geotab y DeviceMappings (una sola vez)...");
 
-                const geotabDevices = await ApiHelpers.getDevices();
-                console.log("[LINK] Geotab devices:", geotabDevices.length);
+                geotabDevicesCache = await ApiHelpers.getDevices();
+                console.log("[LINK] Geotab devices cached:", geotabDevicesCache.length);
 
-                const deviceMappings = await ApiHelpers.getDeviceMappings();
-                console.log("[LINK] DeviceMappings:", deviceMappings.length);
+                deviceMappingsCache = await ApiHelpers.getDeviceMappings();
+                console.log("[LINK] DeviceMappings cached:", deviceMappingsCache.length);
 
-                const srfDevices = await getDevices(await getOrgIdsFromGeotab());
-                console.log("[LINK] Surfsight devices:", srfDevices.length);
-
-                const gtbMap = {};
-                geotabDevices.forEach(d => {
-                    gtbMap[d.serialNumber?.toLowerCase()] = d;
-                });
-
-                const mappingMap = {};
-                deviceMappings.forEach(m => {
-                    mappingMap[m.partnerDeviceId] = m;
-                });
-
-                const enriched = srfDevices.map(srfDevice => {
-                    const mapping = mappingMap[srfDevice.imei];
-                    const gtbDevice = mapping ? gtbMap[mapping.associatedDeviceSerialNumber?.toLowerCase()] : null;
-
-                    return {
-                        ...srfDevice,
-                        gtbName: gtbDevice?.name || srfDevice.name,
-                        gtbLicensePlate: gtbDevice?.licensePlate || 'N/A',
-                        gtbId: gtbDevice?.id || null,
-                        mappingId: mapping?.deviceMappingId || null,
-                        isLinked: !!gtbDevice
-                    };
-                });
-
-                console.log("[LINK] Devices enriquecidos:", enriched.length);
-                enriched.forEach(d => {
-                    if (d.isLinked) {
-                        console.log(`[LINK] ${d.name} → ${d.gtbName} (${d.gtbLicensePlate})`);
-                    }
-                });
-
-                return enriched;
+                orgIdsDataCache = await getOrgIdsFromGeotab();
+                console.log("[LINK] OrgIds data cached");
             } catch (err) {
-                console.error("[LINK] Error enriching devices:", err);
+                console.error("[LINK] Error loading Geotab data:", err);
                 throw err;
             }
+        }
+
+        function enrichSurfsightDevices(srfDevices, geotabDevices, deviceMappings) {
+            const gtbMap = {};
+            geotabDevices.forEach(d => {
+                gtbMap[d.serialNumber?.toLowerCase()] = d;
+            });
+
+            const mappingMap = {};
+            deviceMappings.forEach(m => {
+                mappingMap[m.partnerDeviceId] = m;
+            });
+
+            return srfDevices.map(srfDevice => {
+                const mapping = mappingMap[srfDevice.imei];
+                const gtbDevice = mapping ? gtbMap[mapping.associatedDeviceSerialNumber?.toLowerCase()] : null;
+
+                return {
+                    ...srfDevice,
+                    gtbName: gtbDevice?.name || srfDevice.name,
+                    gtbLicensePlate: gtbDevice?.licensePlate || 'N/A',
+                    gtbId: gtbDevice?.id || null,
+                    mappingId: mapping?.deviceMappingId || null,
+                    isLinked: !!gtbDevice
+                };
+            });
         }
 
         geotab.addin.srfPositions = function (elt, service) {
@@ -362,6 +355,9 @@
             let allDevices = [];
             let currentFilter = 'all';
             let currentSearch = '';
+            let geotabDevicesCache = null;
+            let deviceMappingsCache = null;
+            let orgIdsDataCache = null;
 
             const statusMap = {
                 'offline': 'Sin comunicación',
@@ -544,10 +540,11 @@
                         const locationStyle = (device.lat && device.lon) ? 'color:#065f46;' : 'color:#dc2626;';
 
                         row.innerHTML = `
-                            <div style="font-weight:700; font-size:14px; color:#1f2937; margin-bottom:8px; letter-spacing:-0.3px;">${device.gtbName || device.name}</div>
+                            <div style="font-weight:700; font-size:14px; color:#1f2937; margin-bottom:8px; letter-spacing:-0.3px;">
+                                ${device.gtbName || device.name} <span style="font-size:12px; color:#6b7280; font-weight:400;">(${device.gtbLicensePlate || 'N/A'})</span>
+                            </div>
                             <div style="font-size:12px; color:#6b7280; line-height:1.6;">
-                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span>
-                                <span style="font-size:11px; color:#666; margin-left:8px;">${device.gtbLicensePlate || 'N/A'}</span><br>
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span><br>
                                 <strong style="color:#374151; font-weight:600;">Última comunicación:</strong> ${dateFormatted}<br>
                                 <strong style="color:#374151; font-weight:600;">Velocidad:</strong> ${speed} km/h<br>
                                 <span style="font-size:11px; ${locationStyle}">${locationStatus}</span>
@@ -664,7 +661,7 @@
                 });
             }
 
-            async function loadAndDisplay(orgIdsData) {
+            async function loadAndDisplay() {
                 const statusEl = elt.querySelector("#srf-status");
                 const countEl = elt.querySelector("#srf-device-count");
                 try {
@@ -678,7 +675,8 @@
                     }
 
                     statusEl.textContent = "Cargando dispositivos...";
-                    allDevices = await enrichDevicesWithGeotabData();
+                    const srfDevices = await getSurfsightDevices(orgIdsDataCache);
+                    allDevices = enrichSurfsightDevices(srfDevices, geotabDevicesCache, deviceMappingsCache);
                     drawDevices(allDevices);
                     renderDevicesList(allDevices);
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -733,14 +731,16 @@
                 try {
                     setupEventListeners();
                     await fetchTokenFromGitHub();
-                    const orgIdsData = await getOrgIdsFromGeotab();
 
-                    console.log("[SRF] Database: " + orgIdsData.database + " > geo: " + JSON.stringify(orgIdsData.allGtbIds) + " - srf: " + JSON.stringify(orgIdsData.allSrfIds));
+                    console.log("[SRF] Cargando datos estáticos (Geotab + DeviceMappings)...");
+                    await loadGeotabDataOnce();
 
-                    loadAndDisplay(orgIdsData);
+                    console.log("[SRF] Database: " + orgIdsDataCache.database + " > geo: " + JSON.stringify(orgIdsDataCache.allGtbIds) + " - srf: " + JSON.stringify(orgIdsDataCache.allSrfIds));
+
+                    loadAndDisplay();
                     regularRefreshIntervalId = setInterval(() => {
                         if (isTokenValid) {
-                            loadAndDisplay(orgIdsData);
+                            loadAndDisplay();
                         }
                     }, 10000);
                 } catch (err) {
