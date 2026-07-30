@@ -34,8 +34,6 @@
             let _api = null;
             let _session = null;
             let _sessionPromise = null;
-            let _devices = null;
-            let _users = null;
 
             function init(api) {
                 _api = api;
@@ -45,39 +43,6 @@
                 }).catch(err => {
                     console.error("[Session] Error loading session:", err.message);
                     throw err;
-                });
-            }
-
-            async function call(method, params) {
-                await _sessionPromise;
-
-                return new Promise((resolve, reject) => {
-                    _api.api.call(
-                        method,
-                        params,
-                        resolve,
-                        reject
-                    );
-                });
-            }
-
-            async function getDevices() {
-                return call("Get", {
-                    typeName: "Device"
-                });
-            }
-
-            async function getUsers() {
-                return call("Get", {
-                    typeName: "User",
-                    resultsLimit: 20000
-                });
-            }
-
-            async function getUsers() {
-                return call('Get', {
-                typeName: 'User',
-                resultsLimit: 20000
                 });
             }
 
@@ -93,7 +58,7 @@
                 return _sessionPromise;
             }
 
-            return { init, getApi, getSession, getSessionPromise , getDevices, getUsers};
+            return { init, getApi, getSession, getSessionPromise };
         })();
 
         // ====== SURFSIGHT PIPELINE ======
@@ -139,17 +104,6 @@
         async function srf_getOrgIdsFromGeotab() {
             try {
                 const session = await ApiHelpers.getSessionPromise();
-
-                console.info("-------- [GTB] --------")
-                try {
-                    const devices = await ApiHelpers.getDevices();
-                    console.info(devices);
-
-                    // const users = await ApiHelpers.getUsers();
-                } catch (err) {
-                    console.error(err);
-                }
-
                 const unions = await srf_getUnionsFromGitHub();
                 const database = session.database;
 
