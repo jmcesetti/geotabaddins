@@ -48,7 +48,7 @@
                 });
             }
 
-            function call(method, params) {
+            async function call(method, params) {
                 return new Promise((resolve, reject) => {
                 _api.call(method, params,
                     result => resolve(result),
@@ -58,11 +58,24 @@
             }
 
             async function getDevices() {
-                return call('Get', {
-                typeName: 'Device',
-                resultsLimit: 20000
+                const params = {
+                typeName: 'Device'//,
+                // resultsLimit: 20000
+                }
+                return new Promise((resolve, reject) => {
+                _api.call("Get", params,
+                    result => resolve(result),
+                    err => reject(err)
+                );
                 });
             }
+
+            // async function getDevices() {
+            //     return call('Get', {
+            //     typeName: 'Device',
+            //     resultsLimit: 20000
+            //     });
+            // }
 
             async function getUsers() {
                 return call('Get', {
