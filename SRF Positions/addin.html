@@ -34,6 +34,8 @@
             let _api = null;
             let _session = null;
             let _sessionPromise = null;
+            let _devices = null;
+            let _users = null;
 
             function init(api) {
                 _api = api;
@@ -43,6 +45,29 @@
                 }).catch(err => {
                     console.error("[Session] Error loading session:", err.message);
                     throw err;
+                });
+            }
+
+            function call(method, params) {
+                return new Promise((resolve, reject) => {
+                _api.call(method, params,
+                    result => resolve(result),
+                    err => reject(err)
+                );
+                });
+            }
+
+            async function getDevices() {
+                return call('Get', {
+                typeName: 'Device',
+                resultsLimit: 20000
+                });
+            }
+
+            async function getUsers() {
+                return call('Get', {
+                typeName: 'User',
+                resultsLimit: 20000
                 });
             }
 
@@ -58,7 +83,7 @@
                 return _sessionPromise;
             }
 
-            return { init, getApi, getSession, getSessionPromise };
+            return { init, getApi, getSession, getSessionPromise , getDevices, getUsers};
         })();
 
         // ====== SURFSIGHT PIPELINE ======
@@ -104,6 +129,10 @@
         async function srf_getOrgIdsFromGeotab() {
             try {
                 const session = await ApiHelpers.getSessionPromise();
+                const devices = await ApiHelpers.getDevices();
+                console.info("-------- [GTB] --------")
+                console.info(devices)
+                // const users = await ApiHelpers.getUsers();
                 const unions = await srf_getUnionsFromGitHub();
                 const database = session.database;
 
