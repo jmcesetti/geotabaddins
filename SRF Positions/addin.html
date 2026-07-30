@@ -129,10 +129,16 @@
         async function srf_getOrgIdsFromGeotab() {
             try {
                 const session = await ApiHelpers.getSessionPromise();
-                const devices = await ApiHelpers.getDevices();
+
                 console.info("-------- [GTB] --------")
-                console.info(devices)
-                // const users = await ApiHelpers.getUsers();
+                try {
+                    const devices = await ApiHelpers.getDevices();
+                    console.info(devices)
+                    // const users = await ApiHelpers.getUsers();
+                } catch (err) {
+                    console.error(err.message)
+                }
+
                 const unions = await srf_getUnionsFromGitHub();
                 const database = session.database;
 
