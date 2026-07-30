@@ -63,7 +63,7 @@
                 // resultsLimit: 20000
                 }
                 return new Promise((resolve, reject) => {
-                _api.call("Get", params,
+                _api.api.call("Get", params,
                     result => resolve(result),
                     err => reject(err)
                 );
