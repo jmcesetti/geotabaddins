@@ -49,33 +49,30 @@
             }
 
             async function call(method, params) {
+                await _sessionPromise;
+
                 return new Promise((resolve, reject) => {
-                _api.call(method, params,
-                    result => resolve(result),
-                    err => reject(err)
-                );
+                    _api.api.call(
+                        method,
+                        params,
+                        resolve,
+                        reject
+                    );
                 });
             }
 
             async function getDevices() {
-                const params = {
-                typeName: 'Device'//,
-                // resultsLimit: 20000
-                }
-                return new Promise((resolve, reject) => {
-                _api.api.call("Get", params,
-                    result => resolve(result),
-                    err => reject(err)
-                );
+                return call("Get", {
+                    typeName: "Device"
                 });
             }
 
-            // async function getDevices() {
-            //     return call('Get', {
-            //     typeName: 'Device',
-            //     resultsLimit: 20000
-            //     });
-            // }
+            async function getUsers() {
+                return call("Get", {
+                    typeName: "User",
+                    resultsLimit: 20000
+                });
+            }
 
             async function getUsers() {
                 return call('Get', {
