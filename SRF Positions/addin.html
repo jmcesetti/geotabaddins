@@ -143,10 +143,11 @@
                 console.info("-------- [GTB] --------")
                 try {
                     const devices = await ApiHelpers.getDevices();
-                    console.info(devices)
+                    console.info(devices);
+
                     // const users = await ApiHelpers.getUsers();
                 } catch (err) {
-                    console.error(err.message)
+                    console.error(err);
                 }
 
                 const unions = await srf_getUnionsFromGitHub();
