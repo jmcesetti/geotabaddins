@@ -109,11 +109,7 @@
                 try {
                     console.info("------------------- [GTB] -------------------")
                     const api = await ApiHelpers.getApi();
-                    console.info(api);
-                    console.info(api.api);
-                    console.info(typeof api.get);
-                    console.info(typeof api.api.get);
-                    const devices = await service.api.call("Get", {
+                    const devices = await api.api.call("Get", {
                         typeName: "Device"
                     });
                     console.info(devices)
