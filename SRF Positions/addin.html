@@ -106,15 +106,19 @@
                 const session = await ApiHelpers.getSessionPromise();
                 const unions = await srf_getUnionsFromGitHub();
                 const database = session.database;
+                const devices = {};
                 try {
-                    console.info("------------------- [GTB] -------------------")
-                    const api = await ApiHelpers.getApi();
-                    const devices = await api.api.call("Get", {
+                    console.info("------------------- [GTB] -------------------");
+                    const api = ApiHelpers.getApi();
+                    const raw_devices = await api.api.call("Get", {
                         typeName: "Device"
                     });
-                    console.info(devices)
+                    for (const device of raw_devices) {
+                        devices[device.id] = device;
+                    }
+                    console.info(devices);
                 } catch (err) {
-                    console.error("[GTB] Error: ", err);
+                    console.error("[GTB] Error:", err);
                 }
 
                 const matchingUnions = unions.filter(u => u.geotab_db && u.geotab_db.toLowerCase() === database.toLowerCase());
