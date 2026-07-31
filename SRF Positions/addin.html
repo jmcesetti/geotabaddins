@@ -113,8 +113,10 @@
                     console.info(api.api);
                     console.info(typeof api.get);
                     console.info(typeof api.api.get);
-                    // const gbt_devices = await api.get("Device");
-                    // console.info(gbt_devices);
+                    const devices = await service.api.call("Get", {
+                        typeName: "Device"
+                    });
+                    console.info(devices)
                 } catch (err) {
                     console.error("[GTB] Error: ", err);
                 }
