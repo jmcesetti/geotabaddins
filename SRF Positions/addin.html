@@ -109,8 +109,12 @@
                 try {
                     console.info("------------------- [GTB] -------------------")
                     const api = await ApiHelpers.getApi();
-                    const gbt_devices = await api.get("Device");
-                    console.info(gbt_devices);
+                    console.log(api);
+                    console.log(api.api);
+                    console.log(typeof api.get);
+                    console.log(typeof api.api.get);
+                    // const gbt_devices = await api.get("Device");
+                    // console.info(gbt_devices);
                 } catch (err) {
                     console.error("[GTB] Error: ", err);
                 }
