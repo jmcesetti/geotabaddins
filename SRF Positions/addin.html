@@ -106,6 +106,14 @@
                 const session = await ApiHelpers.getSessionPromise();
                 const unions = await srf_getUnionsFromGitHub();
                 const database = session.database;
+                try {
+                    console.info("------------------- [GTB] -------------------")
+                    const api = await ApiHelpers.getApi();
+                    const gbt_devices = await api.get("Device");
+                    console.info(gbt_devices);
+                } catch (err) {
+                    console.error("[GTB] Error: ", err);
+                }
 
                 const matchingUnions = unions.filter(u => u.geotab_db && u.geotab_db.toLowerCase() === database.toLowerCase());
 
