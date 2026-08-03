@@ -10,6 +10,10 @@
     <script>
         let commitMessage = "";
 
+        let gtbIdsAssigned = false;
+        const GTB_DEVICES = {}
+        const GTB_STATUSINFO = {}
+
         async function getLastCommitMessage() {
             try {
                 const response = await fetch('https://api.github.com/repos/jmcesetti/geotabaddins/commits?per_page=1');
@@ -114,9 +118,15 @@
                         typeName: "Device"
                     });
                     for (const device of raw_devices) {
-                        devices[device.id] = device;
+                        devices[device.id] = {
+                            id: device.id,
+                            licensePlate: device.licensePlate,
+                            serialNumber: device.serialNumber,
+                            name: device.name
+                        };
                     }
-                    console.info(devices);
+                    // console.info(devices);
+                    GTB_DEVICES = devices;
                 } catch (err) {
                     console.error("[GTB] Error:", err);
                 }
@@ -136,6 +146,27 @@
                 console.error("[SRF]", err.message);
                 throw err;
             }
+        }
+
+        async function  status_refreshData(){
+            try {
+                    console.info("------------------- [GTB] -------------------");
+                    const api = ApiHelpers.getApi();
+                    const raw_devices = await api.api.call("Get", {
+                        typeName: "DeviceStatusInfo"
+                    });
+                    for (const device of raw_devices) {
+                        devices[device.device.id] = {
+                            bearing : device.bearing,
+                            datetime : device.dateTime,
+                            communicates : device.IsDeviceCommunicating
+                        };
+                    }
+                    console.info(devices);
+                    GTB_STATUSINFO = devices;
+                } catch (err) {
+                    console.error("[GTB] Error:", err);
+                }
         }
 
         async function srf_getDevicesByOrgId(orgId) {
@@ -362,6 +393,7 @@
                 });
 
                 const data = await response.json();
+                console.log("[TEST] DeviceMappings response:", data);
                 return { success: true, data };
             } catch (err) {
                 console.error("[TEST] ERROR:", err.message);
@@ -715,13 +747,37 @@
                     const mkp_onlyDevices = mkp_allDevices.filter(d => !srf_imeiSet.has(d.imei));
                     const combinedDevices = [...srf_devices, ...mkp_onlyDevices];
 
+//--------------------------------------------------- JM ----------------------------------------------------------------
+                    console.info("[GTB] Assigning GTB IDs to devices...");
+                    if (!gtbIdsAssigned) {
+                        console.info(GTB_DEVICES);
+                        console.info(GTB_STATUSINFO);
+                        const gtbDeviceMap = new Map(
+                            GTB_DEVICES
+                                .filter(d => d.serialNumber)
+                                .map(d => [d.serialNumber, d.id])
+                        );
+                        combinedDevices.forEach(device => {
+                            device.gtbId = gtbDeviceMap.get(device.sn) ?? null;
+                        });
+                        gtbIdsAssigned = true;
+                    }
+                    const communicatingIds = new Set(
+                        GTB_STATUSINFO
+                            .filter(s => s.communicates)
+                            .map(s => s.id)
+                    );
+                    const visibleDevices = combinedDevices.filter(d =>
+                        communicatingIds.has(d.gtbId)
+                    );
+                    combinedDevices = visibleDevices;
+//--------------------------------------------------- JM ----------------------------------------------------------------
+
                     if (combinedDevices.length === 0) {
                         statusEl.textContent = "✗ No hay dispositivos disponibles";
                         statusEl.classList.add("srf-error");
                         return;
                     }
-
-                    
                     drawDevices(combinedDevices);
                     renderDevicesList(combinedDevices);
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -840,6 +896,17 @@
                         }, 30000);
                     } catch (err) {
                         console.error("[MKP] Initialization failed:", err);
+                    }
+                })();
+
+                // StatusInfo PIPELINE
+                status_initPromise = (async () => {
+                    try {
+                        status_refreshIntervalId = setInterval(() => {
+                            status_refreshData();
+                        }, 10000);
+                    } catch (err) {
+                        console.error("[StatusInfo] Initialization failed:", err);
                     }
                 })();
 
