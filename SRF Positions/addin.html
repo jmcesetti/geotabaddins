@@ -153,7 +153,6 @@
 
         async function status_refreshData() {
             try {
-                console.info("------------------- [GTB STATUS] -------------------");
 
                 const api = ApiHelpers.getApi();
 
@@ -762,7 +761,7 @@
                         console.info("[GTB] Assigning GTB IDs...");
 
                         const serialToId = {};
-
+                        // console.info("[GTB] GTB_DEVICES:", GTB_DEVICES);
                         Object.values(GTB_DEVICES).forEach(device => {
                             serialToId[device.serialNumber] = device.id;
                         });
@@ -770,7 +769,7 @@
                         combinedDevices.forEach(device => {
                             device.gtbId = serialToId[device.sn] ?? null;
                         });
-
+                        console.info("[GTB] Combined Devices:", combinedDevices.length);
                         gtbIdsAssigned = true;
                     }
 
@@ -778,7 +777,7 @@
                         const status = GTB_STATUSINFO[device.gtbId];
                         return device.gtbId && status && !status.communicates;
                     });
-
+                    console.info("[GTB] Filtered Combined Devices:", combinedDevices.length);
 //--------------------------------------------------- JM ----------------------------------------------------------------
 
                     if (combinedDevices.length === 0) {
