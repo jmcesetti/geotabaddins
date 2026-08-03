@@ -157,7 +157,7 @@
 
                 const api = ApiHelpers.getApi();
 
-                const raw_devices = await api.api.call({
+                const raw_devices = await api.api.call("Get", {
                     typeName: "DeviceStatusInfo"
                 });
 
