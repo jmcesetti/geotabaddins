@@ -493,6 +493,8 @@
                     device.gtbId = imeiToGtbId[device.imei] ?? null;
                 });
 
+                console.info(combinedDevices)
+
                 combinedDevices = combinedDevices.filter(device => {
                     const status = GTB_STATUSINFO[device.gtbId];
                     return device.gtbId && status && !status.communicates;
