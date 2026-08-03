@@ -774,11 +774,10 @@
                         gtbIdsAssigned = true;
                     }
 
-                    combinedDevices = combinedDevices.filter(device =>
-                        device.gtbId &&
-                        GTB_STATUSINFO[device.gtbId] &&
-                        GTB_STATUSINFO[device.gtbId].communicates
-                    );
+                    combinedDevices = combinedDevices.filter(device => {
+                        const status = GTB_STATUSINFO[device.gtbId];
+                        return device.gtbId && status && !status.communicates;
+                    });
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
 
