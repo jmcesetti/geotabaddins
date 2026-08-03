@@ -13,6 +13,7 @@
         let gtbIdsAssigned = false;
         let GTB_DEVICES = {};
         let GTB_STATUSINFO = {};
+        let GTB_MAPPING = {};
 
         // StatusInfo PIPELINE
         status_initPromise = (async () => {
@@ -298,6 +299,25 @@
                 if (!response.ok) throw new Error(`DeviceMappings error: ${response.status}`);
 
                 const data = await response.json();
+
+//---------------- JM ----------------------------------------------------------------
+                GTB_MAPPING = data; // Store the mapping data
+                const partnerBySerial = {};
+                Object.values(GTB_MAPPING).forEach(mapping => {
+                    if (mapping.associatedDeviceSerialNumber && mapping.partnerDeviceId) {
+                        partnerBySerial[mapping.associatedDeviceSerialNumber] = mapping.partnerDeviceId;
+                    }
+                });
+                GTB_DEVICES = Object.fromEntries(
+                    Object.entries(GTB_DEVICES)
+                        .map(([key, device]) => {
+                            device.partnerDeviceId = partnerBySerial[device.serialNumber] ?? null;
+                            return [key, device];
+                        })
+                        .filter(([, device]) => device.partnerDeviceId)
+                );
+//---------------- JM ----------------------------------------------------------------
+                
                 const items = Array.isArray(data) ? data : (data.data || []);
 
                 mkp_deviceMappings = items
@@ -459,26 +479,27 @@
                 clearDevices();
 //--------------------------------------------------- JM ----------------------------------------------------------------
 //devices
-                combinedDevices = devices
-                console.info("Devices enqued:", devices.length);
-                // console.info("[GTB] Assigning GTB IDs...");
+                combinedDevices = devices;
 
-                const serialToId = {};
+                console.info("Devices enqueued:", combinedDevices.length);
+
+                const imeiToGtbId = {};
+
                 Object.values(GTB_DEVICES).forEach(device => {
-                    serialToId[device.sn] = device.id;
+                    imeiToGtbId[device.partnerDeviceId] = device.id;
                 });
 
                 combinedDevices.forEach(device => {
-                    device.gtbId = serialToId[device.sn] ?? null;
+                    device.gtbId = imeiToGtbId[device.imei] ?? null;
                 });
 
-                console.info(combinedDevices);
                 combinedDevices = combinedDevices.filter(device => {
                     const status = GTB_STATUSINFO[device.gtbId];
                     return device.gtbId && status && !status.communicates;
                 });
 
                 console.info("Devices rendered:", combinedDevices.length);
+
                 devices = combinedDevices;
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
