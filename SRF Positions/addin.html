@@ -18,10 +18,9 @@
         status_initPromise = (async () => {
             try {
                 await status_refreshData();
-
                 status_refreshIntervalId = setInterval(() => {
                     status_refreshData();
-                }, 10000);
+                }, 60000);
             } catch (err) {
                 console.error("[StatusInfo] Initialization failed:", err);
             }
@@ -125,7 +124,7 @@
                 const database = session.database;
                 var devices = {};
                 try {
-                    console.info("------------------- [GTB] -------------------");
+                    // console.info("------------------- [GTB] -------------------");
                     const api = ApiHelpers.getApi();
                     const devices = {};
 
@@ -164,12 +163,11 @@
         async function status_refreshData() {
             try {
 
-                const api = ApiHelpers.getApi();
+                const api = await ApiHelpers.getApi();
 
                 const raw_devices = await api.api.call("Get", {
                     typeName: "DeviceStatusInfo"
                 });
-                console.info("[GTB] Raw DeviceStatusInfo:", raw_devices);
                 const devices = {};
 
                 for (const device of raw_devices) {
@@ -181,7 +179,7 @@
                 }
 
                 GTB_STATUSINFO = devices;
-                console.info(GTB_STATUSINFO);
+                // console.info(GTB_STATUSINFO);
 
             } catch (err) {
                 console.error("[GTB] Error:", err);
@@ -462,11 +460,10 @@
 //--------------------------------------------------- JM ----------------------------------------------------------------
 //devices
                 combinedDevices = devices
-                console.info(devices.length)
-                console.info("[GTB] Assigning GTB IDs...");
+                console.info("Devices enqued:", devices.length);
+                // console.info("[GTB] Assigning GTB IDs...");
 
                 const serialToId = {};
-                // console.info("[GTB] GTB_DEVICES:", GTB_DEVICES);
                 Object.values(GTB_DEVICES).forEach(device => {
                     serialToId[device.sn] = device.id;
                 });
@@ -480,7 +477,7 @@
                     return device.gtbId && status && !status.communicates;
                 });
 
-                console.info("[GTB] Filtered Combined Devices:", combinedDevices.length);
+                console.info("Devices printed:", combinedDevices.length);
                 devices = combinedDevices;
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
