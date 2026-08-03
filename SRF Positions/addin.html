@@ -11,8 +11,8 @@
         let commitMessage = "";
 
         let gtbIdsAssigned = false;
-        const GTB_DEVICES = {}
-        const GTB_STATUSINFO = {}
+        let GTB_DEVICES = {};
+        let GTB_STATUSINFO = {};
 
         async function getLastCommitMessage() {
             try {
@@ -114,9 +114,12 @@
                 try {
                     console.info("------------------- [GTB] -------------------");
                     const api = ApiHelpers.getApi();
+                    const devices = {};
+
                     const raw_devices = await api.api.call("Get", {
                         typeName: "Device"
                     });
+
                     for (const device of raw_devices) {
                         devices[device.id] = {
                             id: device.id,
@@ -125,7 +128,7 @@
                             name: device.name
                         };
                     }
-                    // console.info(devices);
+
                     GTB_DEVICES = devices;
                 } catch (err) {
                     console.error("[GTB] Error:", err);
@@ -148,25 +151,31 @@
             }
         }
 
-        async function  status_refreshData(){
+        async function status_refreshData() {
             try {
-                    console.info("------------------- [GTB] -------------------");
-                    const api = ApiHelpers.getApi();
-                    const raw_devices = await api.api.call("Get", {
-                        typeName: "DeviceStatusInfo"
-                    });
-                    for (const device of raw_devices) {
-                        devices[device.device.id] = {
-                            bearing : device.bearing,
-                            datetime : device.dateTime,
-                            communicates : device.IsDeviceCommunicating
-                        };
-                    }
-                    console.info(devices);
-                    GTB_STATUSINFO = devices;
-                } catch (err) {
-                    console.error("[GTB] Error:", err);
+                console.info("------------------- [GTB STATUS] -------------------");
+
+                const api = ApiHelpers.getApi();
+
+                const raw_devices = await api.api.call({
+                    typeName: "DeviceStatusInfo"
+                });
+
+                const devices = {};
+
+                for (const device of raw_devices) {
+                    devices[device.device.id] = {
+                        bearing: device.bearing,
+                        dateTime: device.dateTime,
+                        communicates: device.isDeviceCommunicating
+                    };
                 }
+
+                GTB_STATUSINFO = devices;
+
+            } catch (err) {
+                console.error("[GTB] Error:", err);
+            }
         }
 
         async function srf_getDevicesByOrgId(orgId) {
@@ -745,32 +754,32 @@
 
                     const srf_imeiSet = new Set(srf_devices.map(d => d.imei).filter(Boolean));
                     const mkp_onlyDevices = mkp_allDevices.filter(d => !srf_imeiSet.has(d.imei));
-                    var combinedDevices = [...srf_devices, ...mkp_onlyDevices];
+                    let combinedDevices = [...srf_devices, ...mkp_onlyDevices];
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
-                    console.info("[GTB] Assigning GTB IDs to devices...");
+
                     if (!gtbIdsAssigned) {
-                        console.info(GTB_DEVICES);
-                        console.info(GTB_STATUSINFO);
-                        const gtbDeviceMap = new Map(
-                            GTB_DEVICES
-                                .filter(d => d.serialNumber)
-                                .map(d => [d.serialNumber, d.id])
-                        );
-                        combinedDevices.forEach(device => {
-                            device.gtbId = gtbDeviceMap.get(device.sn) ?? null;
+                        console.info("[GTB] Assigning GTB IDs...");
+
+                        const serialToId = {};
+
+                        Object.values(GTB_DEVICES).forEach(device => {
+                            serialToId[device.serialNumber] = device.id;
                         });
+
+                        combinedDevices.forEach(device => {
+                            device.gtbId = serialToId[device.sn] ?? null;
+                        });
+
                         gtbIdsAssigned = true;
                     }
-                    var communicatingIds = new Set(
-                        GTB_STATUSINFO
-                            .filter(s => s.communicates)
-                            .map(s => s.id)
+
+                    combinedDevices = combinedDevices.filter(device =>
+                        device.gtbId &&
+                        GTB_STATUSINFO[device.gtbId] &&
+                        GTB_STATUSINFO[device.gtbId].communicates
                     );
-                    var visibleDevices = combinedDevices.filter(d =>
-                        communicatingIds.has(d.gtbId)
-                    );
-                    var combinedDevices = visibleDevices;
+
 //--------------------------------------------------- JM ----------------------------------------------------------------
 
                     if (combinedDevices.length === 0) {
@@ -902,6 +911,8 @@
                 // StatusInfo PIPELINE
                 status_initPromise = (async () => {
                     try {
+                        await status_refreshData();
+
                         status_refreshIntervalId = setInterval(() => {
                             status_refreshData();
                         }, 10000);
