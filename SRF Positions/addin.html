@@ -316,6 +316,7 @@
                         })
                         .filter(([, device]) => device.partnerDeviceId)
                 );
+                console.info(GTB_DEVICES);
 //---------------- JM ----------------------------------------------------------------
                 
                 const items = Array.isArray(data) ? data : (data.data || []);
@@ -493,7 +494,7 @@
                     device.gtbId = imeiToGtbId[device.imei] ?? null;
                 });
 
-                console.info(combinedDevices)
+                // console.info(combinedDevices)
 
                 combinedDevices = combinedDevices.filter(device => {
                     const status = GTB_STATUSINFO[device.gtbId];
