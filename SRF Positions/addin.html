@@ -110,7 +110,7 @@
                 const session = await ApiHelpers.getSessionPromise();
                 const unions = await srf_getUnionsFromGitHub();
                 const database = session.database;
-                const devices = {};
+                var devices = {};
                 try {
                     console.info("------------------- [GTB] -------------------");
                     const api = ApiHelpers.getApi();
@@ -745,7 +745,7 @@
 
                     const srf_imeiSet = new Set(srf_devices.map(d => d.imei).filter(Boolean));
                     const mkp_onlyDevices = mkp_allDevices.filter(d => !srf_imeiSet.has(d.imei));
-                    const combinedDevices = [...srf_devices, ...mkp_onlyDevices];
+                    var combinedDevices = [...srf_devices, ...mkp_onlyDevices];
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
                     console.info("[GTB] Assigning GTB IDs to devices...");
@@ -762,15 +762,15 @@
                         });
                         gtbIdsAssigned = true;
                     }
-                    const communicatingIds = new Set(
+                    var communicatingIds = new Set(
                         GTB_STATUSINFO
                             .filter(s => s.communicates)
                             .map(s => s.id)
                     );
-                    const visibleDevices = combinedDevices.filter(d =>
+                    var visibleDevices = combinedDevices.filter(d =>
                         communicatingIds.has(d.gtbId)
                     );
-                    combinedDevices = visibleDevices;
+                    var combinedDevices = visibleDevices;
 //--------------------------------------------------- JM ----------------------------------------------------------------
 
                     if (combinedDevices.length === 0) {
