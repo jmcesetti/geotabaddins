@@ -472,12 +472,13 @@
                     device.gtbId = serialToId[device.sn] ?? null;
                 });
 
+                console.info(combinedDevices);
                 combinedDevices = combinedDevices.filter(device => {
                     const status = GTB_STATUSINFO[device.gtbId];
                     return device.gtbId && status && !status.communicates;
                 });
 
-                console.info("Devices printed:", combinedDevices.length);
+                console.info("Devices rendered:", combinedDevices.length);
                 devices = combinedDevices;
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
