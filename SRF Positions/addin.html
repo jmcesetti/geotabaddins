@@ -448,7 +448,32 @@
 
             function drawDevices(devices) {
                 clearDevices();
+//--------------------------------------------------- JM ----------------------------------------------------------------
+//devices
 
+                console.info(devices.length)
+                console.info("[GTB] Assigning GTB IDs...");
+
+                const serialToId = {};
+                // console.info("[GTB] GTB_DEVICES:", GTB_DEVICES);
+                Object.values(GTB_DEVICES).forEach(device => {
+                    serialToId[device.sn] = device.id;
+                });
+
+                combinedDevices.forEach(device => {
+                    device.gtbId = serialToId[device.sn] ?? null;
+                });
+                console.info("[GTB] Combined Devices:", combinedDevices.length);
+
+
+                combinedDevices = combinedDevices.filter(device => {
+                    const status = GTB_STATUSINFO[device.gtbId];
+                    return device.gtbId && status && !status.communicates;
+                });
+                console.info("[GTB] Filtered Combined Devices:", combinedDevices.length);
+                devices = combinedDevices;
+
+//--------------------------------------------------- JM ----------------------------------------------------------------
                 if (!Array.isArray(devices) || devices.length === 0) {
                     return;
                 }
@@ -753,32 +778,7 @@
 
                     const srf_imeiSet = new Set(srf_devices.map(d => d.imei).filter(Boolean));
                     const mkp_onlyDevices = mkp_allDevices.filter(d => !srf_imeiSet.has(d.imei));
-                    let combinedDevices = [...srf_devices, ...mkp_onlyDevices];
-
-//--------------------------------------------------- JM ----------------------------------------------------------------
-
-                    if (!gtbIdsAssigned) {
-                        console.info("[GTB] Assigning GTB IDs...");
-
-                        const serialToId = {};
-                        // console.info("[GTB] GTB_DEVICES:", GTB_DEVICES);
-                        Object.values(GTB_DEVICES).forEach(device => {
-                            serialToId[device.serialNumber] = device.id;
-                        });
-
-                        combinedDevices.forEach(device => {
-                            device.gtbId = serialToId[device.sn] ?? null;
-                        });
-                        console.info("[GTB] Combined Devices:", combinedDevices.length);
-                        gtbIdsAssigned = true;
-                    }
-
-                    combinedDevices = combinedDevices.filter(device => {
-                        const status = GTB_STATUSINFO[device.gtbId];
-                        return device.gtbId && status && !status.communicates;
-                    });
-                    console.info("[GTB] Filtered Combined Devices:", combinedDevices.length);
-//--------------------------------------------------- JM ----------------------------------------------------------------
+                    const combinedDevices = [...srf_devices, ...mkp_onlyDevices];
 
                     if (combinedDevices.length === 0) {
                         statusEl.textContent = "✗ No hay dispositivos disponibles";
