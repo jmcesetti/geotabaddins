@@ -169,7 +169,7 @@
                         communicates: device.isDeviceCommunicating
                     };
                 }
-
+                console.info("[GTB] {status}:", devices);
                 GTB_STATUSINFO = devices;
 
             } catch (err) {
@@ -468,7 +468,7 @@
                     const status = GTB_STATUSINFO[device.gtbId];
                     return device.gtbId && status && !status.communicates;
                 });
-                
+
                 console.info("[GTB] Filtered Combined Devices:", combinedDevices.length);
                 devices = combinedDevices;
 
