@@ -450,7 +450,7 @@
                 clearDevices();
 //--------------------------------------------------- JM ----------------------------------------------------------------
 //devices
-
+                combinedDevices = devices
                 console.info(devices.length)
                 console.info("[GTB] Assigning GTB IDs...");
 
@@ -463,13 +463,12 @@
                 combinedDevices.forEach(device => {
                     device.gtbId = serialToId[device.sn] ?? null;
                 });
-                console.info("[GTB] Combined Devices:", combinedDevices.length);
-
 
                 combinedDevices = combinedDevices.filter(device => {
                     const status = GTB_STATUSINFO[device.gtbId];
                     return device.gtbId && status && !status.communicates;
                 });
+                
                 console.info("[GTB] Filtered Combined Devices:", combinedDevices.length);
                 devices = combinedDevices;
 
