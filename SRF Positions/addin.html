@@ -119,7 +119,6 @@
                     const raw_devices = await api.api.call("Get", {
                         typeName: "Device"
                     });
-
                     for (const device of raw_devices) {
                         devices[device.id] = {
                             id: device.id,
@@ -130,6 +129,7 @@
                     }
 
                     GTB_DEVICES = devices;
+                    console.info ("[GTB] {devices}:", devices);
                 } catch (err) {
                     console.error("[GTB] Error:", err);
                 }
