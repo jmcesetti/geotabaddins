@@ -1,26 +1,33 @@
-Aquí tienes el código **completamente limpio, corregido y estructurado**.
+'''gtb-pipeline
+	api_helpers (TODAS LAS PIPELINES deben esperar a estos helpers)
+		getsession (usaremos las credenciales en mkp pipeline)
+		devices (one time)
+			devicemappings (one time)
+			(agregar partnerDeviceId (lo llamaremos "imei") a devices, vincular por serialNumber y associatedDeviceSerialNumber respectivamente) 	
+			devicestatusinfo (60s interval)
+			(agregar a devices "IsDeviceCommunicating" que viene en devicestatusinfo)
 
----
+mkp_pipeline
+	traemos devices (one time)
+	mediaservices, a cada imei de devices (one time, luego 30s interval para los que NO DIERON ERROR. Si todos dieron error, DETENER INDEFINIDAMENTE)
 
-### Principales correcciones y mejoras aplicadas:
+srf_pipeline
+	gettokenfromgithub (6h interval)
+	getunion.csv (6h interval, si no hay id de SRF se DETIENE EL PIPELINE INDEFINIDAMENTE)
+	srf_getDevicesByOrgId (10s interval, consultamos SOLO cuando hallamos id SRF)
 
-1. **Corrección de Errores Críticos (Bugs):**
-* **Scope & Reference Errors:** En `srf_getOrgIdsFromGeotab` estabas declarando la variable local `session` comentada, lo que hacía fallar `database = session.database`. Se corrigió declarando y obteniendo la sesión correctamente.
-* **Variables No Declaradas:** En `drawDevices` usabas `combinedDevices` sin declaración (`let`/`const`).
-* **Variables Redondeadas/Duplicadas:** Había redeclaraciones accidentales de `devices = {}` dentro de bloques `try/catch`.
-* **Cierre de Sintaxis:** Se completó la función `setupEventListeners` y el callback del botón `testBtn` que quedaron cortados al final de tu archivo original.
-
-
-2. **Buenas Prácticas de Código JS:**
-* **Promesas y Asincronía:** Se envolvió el pipeline auto-ejecutable inicial (`status_initPromise`) dentro de una función de inicialización explícita para evitar *unhandled promise rejections* flotantes.
-* **Modularización:** Se agruparon claramente los módulos: `ApiHelpers`, `StatusInfo Pipeline`, `Surfsight Pipeline`, `Marketplace Pipeline` y el punto de entrada de `geotab.addin.srfPositions`.
-* **Limpieza:** Se removió código comentado basura (`// console.info(...)`), redundancias y se homogeneizó la indentación a 4 espacios.
-
-
-
----
-
-### Código Optimizado:
+render_pipeline
+	traemos mkp y srf como "combined" (Interval 10s, Tomamos los datos de mkp y srf SOLO SI LOS PIPELINES ESTAN CORRIENDO, quiere decir que hay datos)
+		unificamos los datos en (lat, lon, imei, lastreport) (null para los vacios)
+	traemos devices (10s interval)
+		mostramos los activos en el panel lateral antes de filtrar
+		filtramos los devices según "IsDeviceCommunicating" = false
+	vinculamos los devices con combined por imei
+	renderizamos solo aquellos devices con lat y lon <> null
+		en el tooltip y mostramos:
+			"name" - "licenseplate"
+			"speed"
+			"lastreport"
 
 ```html
 <!DOCTYPE html>
