@@ -504,10 +504,10 @@ render_pipeline
                     device.gtbId = serialToId[device.sn] ?? null;
                 });
 
-                combinedDevices = combinedDevices.filter(device => {
-                    const status = GTB_STATUSINFO[device.gtbId];
-                    return device.gtbId && status && !status.communicates;
-                });
+                // combinedDevices = combinedDevices.filter(device => {
+                //     const status = GTB_STATUSINFO[device.gtbId];
+                //     return device.gtbId && status && !status.communicates;
+                // });
 
                 console.info("Devices printed:", combinedDevices.length);
                 devices = combinedDevices;
