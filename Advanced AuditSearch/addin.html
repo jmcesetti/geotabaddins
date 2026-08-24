@@ -277,6 +277,12 @@
                     if (audit) {
                         var parsed = parseAuditDetails(audit);
                         var detalle = parsed.changes.join(', ') || '';
+
+                        // Si no hay detalle pero hay serial numbers, usarlos como detalle
+                        if (!detalle && parsed.serialNumbers && parsed.serialNumbers.length > 0) {
+                            detalle = parsed.serialNumbers.join(', ');
+                        }
+
                         var usuario = extractOriginalUser(audit.userName || '');
                         var tipo = audit.name && audit.name.indexOf('Camera Services') !== -1 ? 'Camera Services' : (audit.entityType || '');
 
@@ -406,10 +412,22 @@
                     }
                 }
 
-                // Extraer Serial Numbers: serialNumbers: G9C72111A152
-                var snMatch = text.match(/serialNumbers:\s*([A-Z0-9]+)/);
+                // Extraer Serial Numbers: puede ser uno o muchos separados por comas
+                // Formato 1: serialNumbers: G9C72111A152
+                // Formato 2: G9DHJZY3Z20S, G9DJY21H064N, G7092101CFFE... (al inicio del comment)
+                var snMatch = text.match(/serialNumbers:\s*([A-Z0-9, ]+?)(?:\s*,\s*ruleIds:|$)/);
                 if (snMatch) {
-                    details.serialNumbers.push(snMatch[1]);
+                    var snStr = snMatch[1];
+                    var sns = snStr.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+                    details.serialNumbers = sns;
+                } else if (!text.match(/UserName:|imei|partner/)) {
+                    // Si el comment comienza con serial numbers (como en Get Video Requests)
+                    var initialMatch = text.match(/^([A-Z0-9, ]+?)(?:\s*,\s*ruleIds:|$)/);
+                    if (initialMatch) {
+                        var snStr = initialMatch[1];
+                        var sns = snStr.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
+                        details.serialNumbers = sns;
+                    }
                 }
 
                 // Extraer Partner: partner: surfsight
@@ -420,15 +438,16 @@
 
                 // Extraer cambios después de imeis/partner/etc
                 // Formato: "UserName: x - partner: y, imeis: [z], liveVideo: True, speedUnits: kmh"
-                // Buscar todo después de imeis: [...] o serialNumbers
-                var changesMatch = text.match(/(?:imeis:\s*\[[^\]]+\]|serialNumbers:\s*[^\,]+)\s*,\s*(.+)$/);
+                // Para "Get Video Requests", no hay cambios después de serialNumbers, solo ruleIds
+                // Buscar todo después de imeis: [...] pero no después de serialNumbers (evitar duplicar)
+                var changesMatch = text.match(/imeis:\s*\[[^\]]+\]\s*,\s*(.+?)(?:,\s*ruleIds:|$)/);
                 if (changesMatch) {
                     var changesStr = changesMatch[1];
                     // Dividir por comas y crear lista
                     var changePairs = changesStr.split(',');
                     changePairs.forEach(function(pair) {
                         var trimmed = pair.trim();
-                        if (trimmed) {
+                        if (trimmed && trimmed !== 'ruleIds') {
                             details.changes.push(trimmed);
                         }
                     });
