@@ -1,13 +1,13 @@
 {
-    "name": "SRF Positions Map Add-in",
+    "name": "Advanced Audit Search",
     "supportEmail": "jm@cesetti.com.ar",
     "version": "1.0.8",
     "items": [
         {
-        "page": "map",
-        "title": "SRF Positions Map Add-in",
+        "page": "tripsHistory/",
+        "title": "Advanced Audit Search",
         "mapScript": {
-            "url": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/SRF%20Positions/addin.html"
+            "url": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/Advanced%20AuditSearch/addin.html"
         }
         }],
     "isSigned": false
