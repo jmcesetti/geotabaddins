@@ -266,13 +266,9 @@
                 var tableData = [];
                 tableData.push(['Nombre', 'Detalle', 'Usuario', 'Tipo', 'IMEIs', 'Partner', 'Fecha', 'ID Registro']);
 
-                rows.forEach(function(row) {
-                    var titleEl = row.querySelector('strong');
-                    var title = titleEl ? titleEl.textContent : '';
-
-                    var audit = searchResults.find(function(a) {
-                        return (a.name || '') === title;
-                    });
+                rows.forEach(function(row, idx) {
+                    // Usar el índice para obtener el audit correspondiente de searchResults
+                    var audit = searchResults[idx];
 
                     if (audit) {
                         var parsed = parseAuditDetails(audit);
