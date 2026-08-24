@@ -53,7 +53,7 @@
             </div>
 
             <div style="margin-top:15px;">
-                <label style="display:block; font-weight:500; margin-bottom:6px;">Nombre / Tipo de Auditoría</label>
+                <label style="display:block; font-weight:500; margin-bottom:6px;">Filtro / Referencia de busqueda</label>
                 <input type="text" id="auditDescription" placeholder="Ej: Camera Services o UserLogin" style="width:100%; padding:10px; border:1px solid #d0d7de; border-radius:8px; font-size:15px;">
             </div>
 
@@ -191,13 +191,27 @@
 
                 var filtered = searchResults;
 
-                // Filtrar por descripción/nombre en tiempo real
+                // Filtrar por descripción en todos los campos (búsqueda full-text)
                 if (auditDescription) {
                     var searchText = auditDescription.toLowerCase();
                     filtered = filtered.filter(function(audit) {
-                        var name = (audit.name || '').toLowerCase();
-                        // Búsqueda simple sin wildcards para filtro client-side
-                        return name.indexOf(searchText) !== -1;
+                        var parsed = parseAuditDetails(audit);
+
+                        // Buscar en: nombre, usuario, tipo, detalles, IMEIs, partner, cambios, fecha
+                        var searchFields = [
+                            (audit.name || '').toLowerCase(),
+                            extractOriginalUser(audit.userName || '').toLowerCase(),
+                            (audit.entityType || '').toLowerCase(),
+                            parsedDetails.changes.join(' ').toLowerCase(),
+                            (parsed.imei || '').toString().toLowerCase(),
+                            parsed.imeis.join(' ').toLowerCase(),
+                            (parsed.partner || '').toLowerCase(),
+                            formatTimestamp(audit.dateTime).toLowerCase()
+                        ];
+
+                        return searchFields.some(function(field) {
+                            return field.indexOf(searchText) !== -1;
+                        });
                     });
                 }
 
