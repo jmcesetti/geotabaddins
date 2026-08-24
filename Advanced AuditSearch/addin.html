@@ -149,8 +149,21 @@
                     if (auditImei || auditSerialNumber) {
                         filtered = results.filter(function(audit) {
                             var parsed = parseAuditDetails(audit);
-                            var matchImei = !auditImei || parsed.imei === auditImei || parsed.imeis.indexOf(auditImei) !== -1;
-                            var matchSN = !auditSerialNumber || parsed.serialNumbers.indexOf(auditSerialNumber) !== -1;
+                            var matchImei = true;
+                            var matchSN = true;
+
+                            if (auditImei) {
+                                matchImei = (parsed.imei && parsed.imei.toString() === auditImei.toString()) ||
+                                           (parsed.imeis && parsed.imeis.length > 0 && parsed.imeis.indexOf(auditImei) !== -1);
+                                if (!matchImei) {
+                                    log('   ❌ No coincide IMEI - buscando: ' + auditImei + ', encontrado: ' + parsed.imei + ', imeis: ' + JSON.stringify(parsed.imeis));
+                                }
+                            }
+
+                            if (auditSerialNumber) {
+                                matchSN = parsed.serialNumbers && parsed.serialNumbers.indexOf(auditSerialNumber) !== -1;
+                            }
+
                             return matchImei && matchSN;
                         });
                         log('✅ Después de filtrar IMEI/SN: ' + filtered.length + ' auditorías');
