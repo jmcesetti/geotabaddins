@@ -202,9 +202,9 @@
                             (audit.name || '').toLowerCase(),
                             extractOriginalUser(audit.userName || '').toLowerCase(),
                             (audit.entityType || '').toLowerCase(),
-                            parsed.changes.join(' ').toLowerCase(),
+                            (parsed.changes && parsed.changes.length > 0 ? parsed.changes.join(' ') : '').toLowerCase(),
                             (parsed.imei || '').toString().toLowerCase(),
-                            parsed.imeis.join(' ').toLowerCase(),
+                            (parsed.imeis && parsed.imeis.length > 0 ? parsed.imeis.join(' ') : '').toLowerCase(),
                             (parsed.partner || '').toLowerCase(),
                             formatTimestamp(audit.dateTime).toLowerCase()
                         ];
