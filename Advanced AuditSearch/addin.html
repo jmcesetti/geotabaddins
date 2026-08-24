@@ -137,10 +137,10 @@
                     log('🔢 Serial Number: ' + auditSerialNumber);
                 }
 
-                // Agregar keywords a la búsqueda si es Camera Services
+                // Agregar nombre a la búsqueda si es Camera Services
                 if (auditType === 'Camera Services') {
-                    search.keywords = 'Camera Services';
-                    log('🔍 Keywords: Camera Services');
+                    search.name = '%Camera Services%';
+                    log('🔍 Buscando por nombre: %Camera Services%');
                 }
 
                 api.call('Get', {
