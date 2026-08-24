@@ -137,12 +137,18 @@
                     log('🔢 Serial Number: ' + auditSerialNumber);
                 }
 
+                // Agregar keywords a la búsqueda si es Camera Services
+                if (auditType === 'Camera Services') {
+                    search.keywords = 'Camera Services';
+                    log('🔍 Keywords: Camera Services');
+                }
+
                 api.call('Get', {
                     typeName: 'Audit',
                     search: search,
                     resultsLimit: 1000
                 }, function(results) {
-                    log('✅ Se encontraron ' + results.length + ' auditorías iniciales');
+                    log('✅ Se encontraron ' + results.length + ' auditorías');
 
                     // Filtrar por IMEI y Serial Number si se especificaron
                     var filtered = results;
@@ -155,9 +161,6 @@
                             if (auditImei) {
                                 matchImei = (parsed.imei && parsed.imei.toString() === auditImei.toString()) ||
                                            (parsed.imeis && parsed.imeis.length > 0 && parsed.imeis.indexOf(auditImei) !== -1);
-                                if (!matchImei) {
-                                    log('   ❌ No coincide IMEI - buscando: ' + auditImei + ', encontrado: ' + parsed.imei + ', imeis: ' + JSON.stringify(parsed.imeis));
-                                }
                             }
 
                             if (auditSerialNumber) {
