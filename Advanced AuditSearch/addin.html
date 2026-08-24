@@ -3,7 +3,6 @@
 <head>
     <meta charset="utf-8">
     <title>Advanced Audit Search</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js"></script>
 </head>
 <body>
     <div id="audit-addin-root" style="font-family:'Segoe UI',Roboto,Arial,sans-serif; color:#333; background:transparent; display:flex; justify-content:center; align-items:flex-start; padding:20px;">
@@ -264,8 +263,8 @@
                     return;
                 }
 
-                var excelData = [];
-                excelData.push(['Nombre', 'Detalle', 'Usuario', 'Tipo', 'IMEIs', 'Partner', 'Fecha', 'ID Registro']);
+                var csvData = [];
+                csvData.push(['Nombre', 'Detalle', 'Usuario', 'Tipo', 'IMEIs', 'Partner', 'Fecha', 'ID Registro']);
 
                 rows.forEach(function(row) {
                     var titleEl = row.querySelector('strong');
@@ -285,32 +284,31 @@
                         var fecha = formatTimestamp(audit.dateTime);
                         var id = audit.id || '';
 
-                        excelData.push([title, detalle, usuario, tipo, imeis, partner, fecha, id]);
+                        csvData.push([title, detalle, usuario, tipo, imeis, partner, fecha, id]);
                     }
                 });
 
-                // Crear workbook de Excel con SheetJS
-                var ws = XLSX.utils.aoa_to_sheet(excelData);
-                var wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, 'Auditorías');
-
-                // Ajustar ancho de columnas
-                ws['!cols'] = [
-                    {wch: 30},  // Nombre
-                    {wch: 40},  // Detalle
-                    {wch: 25},  // Usuario
-                    {wch: 20},  // Tipo
-                    {wch: 25},  // IMEIs
-                    {wch: 15},  // Partner
-                    {wch: 20},  // Fecha
-                    {wch: 30}   // ID Registro
-                ];
+                // Convertir a CSV
+                var csv = csvData.map(function(row) {
+                    return row.map(function(cell) {
+                        var escaped = (cell || '').toString().replace(/"/g, '""');
+                        return '"' + escaped + '"';
+                    }).join(',');
+                }).join('\n');
 
                 // Descargar archivo
-                XLSX.writeFile(wb, 'audit_export_' + new Date().getTime() + '.xlsx');
+                var blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+                var link = document.createElement('a');
+                var url = URL.createObjectURL(blob);
+                link.setAttribute('href', url);
+                link.setAttribute('download', 'audit_export_' + new Date().getTime() + '.csv');
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
 
-                log('📥 Exportados ' + (excelData.length - 1) + ' registros a Excel');
-                showStatus('Exportación completada: ' + (excelData.length - 1) + ' registros', 'success');
+                log('📥 Exportados ' + (csvData.length - 1) + ' registros a CSV');
+                showStatus('Exportación completada: ' + (csvData.length - 1) + ' registros', 'success');
             }
 
             function parseAuditDetails(audit) {
