@@ -271,6 +271,7 @@
                     var audit = searchResults[idx];
 
                     if (audit) {
+                        var title = audit.name || audit.referenceId || audit.id || 'Sin título';
                         var parsed = parseAuditDetails(audit);
                         var detalle = parsed.changes.join(', ') || '';
 
