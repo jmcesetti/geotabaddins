@@ -112,13 +112,13 @@
                 var search = {};
 
                 if (auditFromDate) {
-                    search.fromDate = new Date(auditFromDate).toISOString();
+                    var fromDate = new Date(auditFromDate + 'T00:00:00');
+                    search.fromDate = fromDate.toISOString();
                     log('📅 Desde: ' + search.fromDate);
                 }
 
                 if (auditToDate) {
-                    var toDate = new Date(auditToDate);
-                    toDate.setHours(23, 59, 59, 999);
+                    var toDate = new Date(auditToDate + 'T23:59:59');
                     search.toDate = toDate.toISOString();
                     log('📅 Hasta: ' + search.toDate);
                 }
