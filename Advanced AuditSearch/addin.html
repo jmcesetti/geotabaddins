@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Advanced Audit Search</title>
+</head>
+<body>
+    <div id="audit-addin-root"></div>
+
+    <script>
+        // ====== API HELPERS ======
+        const ApiHelpers = (() => {
+            let _api = null;
+            let _session = null;
+            let _sessionPromise = null;
+
+            function init(api) {
+                _api = api;
+                _sessionPromise = _api.api.getSession().then(session => {
+                    _session = session;
+                    return session;
+                }).catch(err => {
+                    console.error("[Session] Error loading session:", err.message);
+                    throw err;
+                });
+            }
+
+            function getApi() {
+                return _api;
+            }
+
+            function getSession() {
+                return _session;
+            }
+
+            function getSessionPromise() {
+                return _sessionPromise;
+            }
+
+            return { init, getApi, getSession, getSessionPromise };
+        })();
+
+        // ====== AUDIT SEARCH ADDIN ======
+        geotab.addin.auditSearch = function (elt, service) {
+            ApiHelpers.init(service);
+
+            let searchResults = [];
+            let currentPage = 1;
+            const resultsPerPage = 10;
+
+            const auditTypes = {
+                'User': 'Usuario',
+                'Device': 'Dispositivo',
+                'Group': 'Grupo',
+                'Driver': 'Conductor',
+                'Trip': 'Viaje',
+                'LogRecord': 'Registro de posición',
+                'StatusData': 'Datos de estado',
+                'ExceptionEvent': 'Evento de excepción',
+                'Zone': 'Zona',
+                'Route': 'Ruta'
+            };
+
+            // Inyectar estilos
+            const style = document.createElement('style');
+            style.textContent = `
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { font-family: 'Segoe UI', Roboto, Arial, sans-serif; background: #f8f9fa; color: #333; }
+
+                #audit-addin-root { width: 100%; height: 100%; }
+
+                .audit-container {
+                    display: flex;
+                    flex-direction: column;
+                    height: 100%;
+                    background: #f8f9fa;
+                }
+
+                .audit-header {
+                    background: #0076BE;
+                    color: white;
+                    padding: 24px;
+                    border-bottom: 1px solid #005A9E;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+                }
+
+                .audit-header h1 {
+                    font-size: 24px;
+                    font-weight: 700;
+                    margin-bottom: 12px;
+                    letter-spacing: -0.5px;
+                }
+
+                .audit-header p {
+                    font-size: 13px;
+                    opacity: 0.95;
+                }
+
+                .audit-content {
+                    display: flex;
+                    flex: 1;
+                    overflow: hidden;
+                }
+
+                .audit-sidebar {
+                    width: 380px;
+                    background: white;
+                    border-right: 1px solid #D0D7DE;
+                    display: flex;
+                    flex-direction: column;
+                    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
+                }
+
+                .audit-search-panel {
+                    padding: 20px;
+                    border-bottom: 1px solid #D0D7DE;
+                    background: #f8f9fa;
+                }
+
+                .audit-search-panel h3 {
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #333;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 14px;
+                }
+
+                .form-group {
+                    margin-bottom: 14px;
+                }
+
+                .form-group label {
+                    display: block;
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: #333;
+                    margin-bottom: 6px;
+                }
+
+                .form-group input,
+                .form-group select {
+                    width: 100%;
+                    padding: 8px 10px;
+                    border: 1.5px solid #D0D7DE;
+                    border-radius: 7px;
+                    font-size: 13px;
+                    background: white;
+                    color: #333;
+                    transition: all 0.2s;
+                }
+
+                .form-group input:focus,
+                .form-group select:focus {
+                    outline: none;
+                    border-color: #0076BE;
+                    box-shadow: 0 0 0 3px rgba(0, 118, 190, 0.1);
+                }
+
+                .form-group input::placeholder {
+                    color: #999;
+                }
+
+                .date-range-group {
+                    display: flex;
+                    gap: 8px;
+                }
+
+                .date-range-group input {
+                    flex: 1;
+                }
+
+                .audit-button-group {
+                    display: flex;
+                    gap: 8px;
+                    margin-top: 12px;
+                }
+
+                .btn {
+                    flex: 1;
+                    padding: 8px 14px;
+                    border: 1.5px solid #0076BE;
+                    background: #0076BE;
+                    color: white;
+                    border-radius: 7px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+
+                .btn:hover {
+                    background: #005A9E;
+                    border-color: #005A9E;
+                }
+
+                .btn:active {
+                    transform: scale(0.98);
+                }
+
+                .btn-secondary {
+                    background: white;
+                    color: #0076BE;
+                    border-color: #D0D7DE;
+                }
+
+                .btn-secondary:hover {
+                    background: #f0f4ff;
+                    border-color: #0076BE;
+                }
+
+                .audit-results {
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: 12px;
+                    -webkit-overflow-scrolling: touch;
+                }
+
+                .audit-results-empty {
+                    padding: 40px 16px;
+                    text-align: center;
+                    color: #999;
+                    font-size: 12px;
+                }
+
+                .audit-result-item {
+                    padding: 12px;
+                    background: white;
+                    border: 1px solid #D0D7DE;
+                    border-radius: 7px;
+                    margin-bottom: 8px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                }
+
+                .audit-result-item:hover {
+                    background: #f0f4ff;
+                    border-color: #0076BE;
+                    box-shadow: 0 2px 8px rgba(0, 118, 190, 0.12);
+                }
+
+                .audit-result-title {
+                    font-weight: 700;
+                    font-size: 13px;
+                    color: #1f2937;
+                    margin-bottom: 6px;
+                }
+
+                .audit-result-meta {
+                    font-size: 12px;
+                    color: #666;
+                    line-height: 1.5;
+                }
+
+                .audit-result-meta strong {
+                    color: #333;
+                    font-weight: 600;
+                }
+
+                .audit-result-badge {
+                    display: inline-block;
+                    padding: 2px 7px;
+                    background: #E3F2FD;
+                    color: #1565C0;
+                    border-radius: 10px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    margin-right: 4px;
+                    margin-bottom: 6px;
+                }
+
+                .audit-main {
+                    flex: 1;
+                    display: flex;
+                    flex-direction: column;
+                    background: white;
+                    overflow: hidden;
+                }
+
+                .audit-detail {
+                    flex: 1;
+                    padding: 24px;
+                    overflow-y: auto;
+                    -webkit-overflow-scrolling: touch;
+                }
+
+                .audit-detail-empty {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    height: 100%;
+                    color: #999;
+                    font-size: 13px;
+                }
+
+                .audit-detail-item {
+                    margin-bottom: 16px;
+                }
+
+                .audit-detail-label {
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: #666;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    margin-bottom: 4px;
+                }
+
+                .audit-detail-value {
+                    font-size: 13px;
+                    color: #333;
+                    word-break: break-word;
+                }
+
+                .audit-status-loading {
+                    padding: 8px 12px;
+                    background: #fff3cd;
+                    color: #856404;
+                    border-radius: 7px;
+                    font-size: 12px;
+                    text-align: center;
+                    margin-bottom: 12px;
+                }
+
+                .audit-status-error {
+                    background: #f8d7da;
+                    color: #721c24;
+                }
+
+                .audit-status-success {
+                    background: #d4edda;
+                    color: #155724;
+                }
+
+                .audit-pagination {
+                    padding: 12px;
+                    border-top: 1px solid #D0D7DE;
+                    background: #f8f9fa;
+                    text-align: center;
+                    font-size: 12px;
+                    color: #666;
+                }
+
+                .audit-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 12px;
+                }
+
+                .audit-table th {
+                    background: #f0f4ff;
+                    border: 1px solid #D0D7DE;
+                    padding: 8px;
+                    text-align: left;
+                    font-weight: 600;
+                    color: #333;
+                }
+
+                .audit-table td {
+                    border: 1px solid #D0D7DE;
+                    padding: 8px;
+                    color: #333;
+                }
+
+                .audit-table tr:hover {
+                    background: #f8f9fa;
+                }
+            `;
+            document.head.appendChild(style);
+
+            // Construir HTML
+            elt.innerHTML = `
+                <div class="audit-container">
+                    <div class="audit-header">
+                        <h1>🔍 Búsqueda Avanzada de Auditoría</h1>
+                        <p>Busca y explora registros de auditoría del sistema</p>
+                    </div>
+
+                    <div class="audit-content">
+                        <div class="audit-sidebar">
+                            <div class="audit-search-panel">
+                                <h3>Criterios de búsqueda</h3>
+
+                                <div class="form-group">
+                                    <label>Tipo de Auditoría</label>
+                                    <select id="auditType" style="width: 100%;">
+                                        <option value="">-- Seleccionar tipo --</option>
+                                        <option value="User">Usuario</option>
+                                        <option value="Device">Dispositivo</option>
+                                        <option value="Group">Grupo</option>
+                                        <option value="Driver">Conductor</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Usuario</label>
+                                    <input type="text" id="auditUser" placeholder="Nombre de usuario">
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Rango de fechas</label>
+                                    <div class="date-range-group">
+                                        <input type="date" id="auditFromDate">
+                                        <input type="date" id="auditToDate">
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Descripción / Referencia</label>
+                                    <input type="text" id="auditDescription" placeholder="Buscar en descripción...">
+                                </div>
+
+                                <div class="audit-button-group">
+                                    <button class="btn" id="auditSearchBtn">Buscar</button>
+                                    <button class="btn btn-secondary" id="auditClearBtn">Limpiar</button>
+                                </div>
+
+                                <div id="auditStatus" style="margin-top: 12px;"></div>
+                            </div>
+
+                            <div class="audit-results" id="auditResultsContainer">
+                                <div class="audit-results-empty">Sin resultados. Ajusta los criterios y busca.</div>
+                            </div>
+
+                            <div class="audit-pagination" id="auditPagination"></div>
+                        </div>
+
+                        <div class="audit-main">
+                            <div class="audit-detail" id="auditDetail">
+                                <div class="audit-detail-empty">Selecciona un resultado para ver detalles</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Event Listeners
+            const searchBtn = elt.querySelector('#auditSearchBtn');
+            const clearBtn = elt.querySelector('#auditClearBtn');
+            const statusEl = elt.querySelector('#auditStatus');
+            const resultsContainer = elt.querySelector('#auditResultsContainer');
+            const detailContainer = elt.querySelector('#auditDetail');
+            const paginationEl = elt.querySelector('#auditPagination');
+
+            searchBtn.addEventListener('click', performSearch);
+            clearBtn.addEventListener('click', clearSearch);
+
+            async function performSearch() {
+                const auditType = elt.querySelector('#auditType').value;
+                const auditUser = elt.querySelector('#auditUser').value;
+                const auditFromDate = elt.querySelector('#auditFromDate').value;
+                const auditToDate = elt.querySelector('#auditToDate').value;
+                const auditDesc = elt.querySelector('#auditDescription').value;
+
+                if (!auditType) {
+                    showStatus('Por favor selecciona un tipo de auditoría', 'error');
+                    return;
+                }
+
+                showStatus('Buscando...', 'loading');
+                searchBtn.disabled = true;
+
+                try {
+                    const session = await ApiHelpers.getSessionPromise();
+                    const api = ApiHelpers.getApi();
+
+                    let search = {};
+
+                    if (auditFromDate) {
+                        search.fromDate = new Date(auditFromDate).toISOString();
+                    }
+                    if (auditToDate) {
+                        const toDate = new Date(auditToDate);
+                        toDate.setHours(23, 59, 59, 999);
+                        search.toDate = toDate.toISOString();
+                    }
+                    if (auditUser) {
+                        search.user = { name: auditUser };
+                    }
+                    if (auditDesc) {
+                        search.referenceId = auditDesc;
+                    }
+
+                    const results = await new Promise((resolve, reject) => {
+                        api.api.call('Get', {
+                            typeName: 'Audit',
+                            search: search,
+                            resultsLimit: 1000
+                        }, resolve, reject);
+                    });
+
+                    searchResults = results || [];
+                    currentPage = 1;
+
+                    if (searchResults.length === 0) {
+                        showStatus(`No se encontraron resultados (Tipo: ${auditType})`, 'success');
+                        renderResults([]);
+                        return;
+                    }
+
+                    showStatus(`Se encontraron ${searchResults.length} resultados`, 'success');
+                    renderResults(getPageResults());
+                    updatePagination();
+                } catch (err) {
+                    console.error("[Audit Search]", err);
+                    showStatus(`Error en búsqueda: ${err.message}`, 'error');
+                } finally {
+                    searchBtn.disabled = false;
+                }
+            }
+
+            function clearSearch() {
+                elt.querySelector('#auditType').value = '';
+                elt.querySelector('#auditUser').value = '';
+                elt.querySelector('#auditFromDate').value = '';
+                elt.querySelector('#auditToDate').value = '';
+                elt.querySelector('#auditDescription').value = '';
+                statusEl.innerHTML = '';
+                resultsContainer.innerHTML = '<div class="audit-results-empty">Sin resultados. Ajusta los criterios y busca.</div>';
+                detailContainer.innerHTML = '<div class="audit-detail-empty">Selecciona un resultado para ver detalles</div>';
+                paginationEl.innerHTML = '';
+                searchResults = [];
+            }
+
+            function showStatus(message, type = 'loading') {
+                let className = 'audit-status-loading';
+                if (type === 'error') className = 'audit-status-loading audit-status-error';
+                if (type === 'success') className = 'audit-status-loading audit-status-success';
+
+                statusEl.innerHTML = `<div class="${className}">${message}</div>`;
+            }
+
+            function getPageResults() {
+                const start = (currentPage - 1) * resultsPerPage;
+                return searchResults.slice(start, start + resultsPerPage);
+            }
+
+            function renderResults(results) {
+                resultsContainer.innerHTML = '';
+
+                if (results.length === 0) {
+                    resultsContainer.innerHTML = '<div class="audit-results-empty">Sin resultados</div>';
+                    return;
+                }
+
+                results.forEach((audit, index) => {
+                    const resultEl = document.createElement('div');
+                    resultEl.className = 'audit-result-item';
+
+                    const badge = audit.entityType ? `<span class="audit-result-badge">${audit.entityType}</span>` : '';
+                    const timestamp = audit.dateTime ? new Date(audit.dateTime).toLocaleString('es-AR') : 'N/A';
+                    const userName = audit.user?.name || audit.userName || 'Sistema';
+
+                    resultEl.innerHTML = `
+                        <div class="audit-result-badge">${audit.entity || 'Entidad'}</div>
+                        <div class="audit-result-title">${audit.referenceId || audit.id || 'Sin título'}</div>
+                        <div class="audit-result-meta">
+                            <strong>Usuario:</strong> ${userName}<br>
+                            <strong>Fecha:</strong> ${timestamp}
+                        </div>
+                    `;
+
+                    resultEl.addEventListener('click', () => {
+                        renderDetail(audit);
+                    });
+
+                    resultsContainer.appendChild(resultEl);
+                });
+            }
+
+            function renderDetail(audit) {
+                detailContainer.innerHTML = `
+                    <div>
+                        <div class="audit-detail-item">
+                            <div class="audit-detail-label">Referencia</div>
+                            <div class="audit-detail-value">${audit.referenceId || 'N/A'}</div>
+                        </div>
+
+                        <div class="audit-detail-item">
+                            <div class="audit-detail-label">Usuario</div>
+                            <div class="audit-detail-value">${audit.user?.name || audit.userName || 'Sistema'}</div>
+                        </div>
+
+                        <div class="audit-detail-item">
+                            <div class="audit-detail-label">Tipo de Entidad</div>
+                            <div class="audit-detail-value">${audit.entityType || 'N/A'}</div>
+                        </div>
+
+                        <div class="audit-detail-item">
+                            <div class="audit-detail-label">Entidad</div>
+                            <div class="audit-detail-value">${audit.entity || 'N/A'}</div>
+                        </div>
+
+                        <div class="audit-detail-item">
+                            <div class="audit-detail-label">Fecha y Hora</div>
+                            <div class="audit-detail-value">${audit.dateTime ? new Date(audit.dateTime).toLocaleString('es-AR') : 'N/A'}</div>
+                        </div>
+
+                        <div class="audit-detail-item">
+                            <div class="audit-detail-label">ID de Entidad</div>
+                            <div class="audit-detail-value" style="font-family: monospace; font-size: 11px;">${audit.entity || audit.id || 'N/A'}</div>
+                        </div>
+
+                        <div class="audit-detail-item">
+                            <div class="audit-detail-label">Datos JSON Completos</div>
+                            <pre style="background: #f8f9fa; padding: 10px; border-radius: 7px; border: 1px solid #D0D7DE; font-size: 11px; overflow-x: auto;">${JSON.stringify(audit, null, 2)}</pre>
+                        </div>
+                    </div>
+                `;
+            }
+
+            function updatePagination() {
+                const totalPages = Math.ceil(searchResults.length / resultsPerPage);
+                if (totalPages <= 1) {
+                    paginationEl.innerHTML = '';
+                    return;
+                }
+
+                let html = `Página ${currentPage} de ${totalPages}`;
+                if (currentPage > 1) {
+                    html = `<button class="btn btn-secondary" style="width: auto; display: inline-block; margin-right: 8px;" id="prevBtn">← Anterior</button>` + html;
+                }
+                if (currentPage < totalPages) {
+                    html = html + `<button class="btn btn-secondary" style="width: auto; display: inline-block; margin-left: 8px;" id="nextBtn">Siguiente →</button>`;
+                }
+
+                paginationEl.innerHTML = html;
+
+                const prevBtn = elt.querySelector('#prevBtn');
+                const nextBtn = elt.querySelector('#nextBtn');
+
+                if (prevBtn) {
+                    prevBtn.addEventListener('click', () => {
+                        currentPage--;
+                        renderResults(getPageResults());
+                        updatePagination();
+                        resultsContainer.scrollTop = 0;
+                    });
+                }
+
+                if (nextBtn) {
+                    nextBtn.addEventListener('click', () => {
+                        currentPage++;
+                        renderResults(getPageResults());
+                        updatePagination();
+                        resultsContainer.scrollTop = 0;
+                    });
+                }
+            }
+
+            // Inicializar
+            ApiHelpers.getSessionPromise().then(() => {
+                console.log("[Audit Search] Add-in initialized");
+            }).catch(err => {
+                showStatus(`Error cargando sesión: ${err.message}`, 'error');
+            });
+        };
+    </script>
+</body>
+</html>
