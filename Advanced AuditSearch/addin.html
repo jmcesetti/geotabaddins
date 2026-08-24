@@ -76,6 +76,7 @@
             var state = null;
             var logBox = document.getElementById('log');
             var searchResults = [];
+            var filterTimeout = null;
 
             function log(msg) {
                 logBox.textContent += msg + '\n';
@@ -439,10 +440,13 @@
             document.getElementById('auditSearchBtn').addEventListener('click', performSearch);
             document.getElementById('auditClearBtn').addEventListener('click', clearSearch);
 
-            // Filtro en tiempo real para el campo de Descripción/Nombre
+            // Filtro en tiempo real para el campo de Descripción/Nombre (con debounce de 300ms)
             document.getElementById('auditDescription').addEventListener('input', function() {
                 if (searchResults.length > 0) {
-                    applyClientFilters();
+                    clearTimeout(filterTimeout);
+                    filterTimeout = setTimeout(function() {
+                        applyClientFilters();
+                    }, 700);
                 }
             });
 
