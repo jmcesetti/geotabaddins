@@ -1,14 +1,14 @@
 {
     "name": "Advanced Audit Search",
     "supportEmail": "jm@cesetti.com.ar",
-    "version": "1.0.8",
+    "version": "1.0.0",
     "items": [
         {
-        "page": "tripsHistory/",
-        "title": "Advanced Audit Search",
-        "mapScript": {
-            "url": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/Advanced%20AuditSearch/addin.html"
+            "url": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/Advanced%20AuditSearch/addin.html",
+            "path": "tripsHistory/",
+            "menuName": "Advanced Audit Search",
+            "icon": ""
         }
-        }],
+    ],
     "isSigned": false
 }
