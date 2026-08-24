@@ -18,12 +18,25 @@
                         <option value="Device">Dispositivo</option>
                         <option value="Group">Grupo</option>
                         <option value="Driver">Conductor</option>
+                        <option value="Camera Services">Camera Services</option>
                     </select>
                 </div>
 
                 <div>
                     <label style="display:block; font-weight:500; margin-bottom:6px;">Usuario</label>
                     <input type="text" id="auditUser" placeholder="Nombre de usuario" style="width:100%; padding:10px; border:1px solid #d0d7de; border-radius:8px; font-size:15px;">
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-top:15px;">
+                <div>
+                    <label style="display:block; font-weight:500; margin-bottom:6px;">IMEI (Cámara)</label>
+                    <input type="text" id="auditImei" placeholder="Ej: 357660104542709" style="width:100%; padding:10px; border:1px solid #d0d7de; border-radius:8px; font-size:15px;">
+                </div>
+
+                <div>
+                    <label style="display:block; font-weight:500; margin-bottom:6px;">Serial Number</label>
+                    <input type="text" id="auditSerialNumber" placeholder="Ej: G9C72111A152" style="width:100%; padding:10px; border:1px solid #d0d7de; border-radius:8px; font-size:15px;">
                 </div>
             </div>
 
@@ -83,6 +96,8 @@
                 var auditFromDate = document.getElementById('auditFromDate').value;
                 var auditToDate = document.getElementById('auditToDate').value;
                 var auditDescription = document.getElementById('auditDescription').value;
+                var auditImei = document.getElementById('auditImei').value;
+                var auditSerialNumber = document.getElementById('auditSerialNumber').value;
 
                 if (!auditType) {
                     showStatus('Por favor selecciona un tipo de auditoría', 'error');
@@ -114,15 +129,36 @@
                     log('🔎 Descripción: ' + auditDescription);
                 }
 
+                if (auditImei) {
+                    log('📱 IMEI: ' + auditImei);
+                }
+
+                if (auditSerialNumber) {
+                    log('🔢 Serial Number: ' + auditSerialNumber);
+                }
+
                 api.call('Get', {
                     typeName: 'Audit',
                     search: search,
                     resultsLimit: 1000
                 }, function(results) {
-                    log('✅ Se encontraron ' + results.length + ' auditorías');
-                    searchResults = results || [];
-                    renderResults(results);
-                    showStatus('Se encontraron ' + results.length + ' resultados', 'success');
+                    log('✅ Se encontraron ' + results.length + ' auditorías iniciales');
+
+                    // Filtrar por IMEI y Serial Number si se especificaron
+                    var filtered = results;
+                    if (auditImei || auditSerialNumber) {
+                        filtered = results.filter(function(audit) {
+                            var parsed = parseAuditDetails(audit);
+                            var matchImei = !auditImei || parsed.imei === auditImei || parsed.imeis.indexOf(auditImei) !== -1;
+                            var matchSN = !auditSerialNumber || parsed.serialNumbers.indexOf(auditSerialNumber) !== -1;
+                            return matchImei && matchSN;
+                        });
+                        log('✅ Después de filtrar IMEI/SN: ' + filtered.length + ' auditorías');
+                    }
+
+                    searchResults = filtered;
+                    renderResults(filtered);
+                    showStatus('Se encontraron ' + filtered.length + ' resultados', 'success');
                 }, function(err) {
                     log('❌ Error en búsqueda: ' + err);
                     showStatus('Error: ' + err, 'error');
@@ -135,9 +171,79 @@
                 document.getElementById('auditFromDate').value = '';
                 document.getElementById('auditToDate').value = '';
                 document.getElementById('auditDescription').value = '';
+                document.getElementById('auditImei').value = '';
+                document.getElementById('auditSerialNumber').value = '';
                 document.getElementById('auditStatus').style.display = 'none';
                 document.getElementById('auditResultsContainer').innerHTML = '';
                 log('🧹 Búsqueda limpiada');
+            }
+
+            function parseAuditDetails(audit) {
+                var details = {
+                    imei: null,
+                    imeis: [],
+                    serialNumbers: [],
+                    timeRange: null,
+                    partner: null,
+                    modificationType: null,
+                    originalUser: null
+                };
+
+                if (!audit.comment) return details;
+
+                var text = audit.comment || '';
+
+                // Extraer IMEI único: imei: 357660104542709
+                var imeiMatch = text.match(/imei:\s*(\d+)/);
+                if (imeiMatch) {
+                    details.imei = imeiMatch[1];
+                }
+
+                // Extraer IMEIs múltiples: imeis: [357660104542709],[type]
+                var imeisMatch = text.match(/imeis:\s*\[([\d,\[\]]+)\]/);
+                if (imeisMatch) {
+                    var imeiStr = imeisMatch[1];
+                    var nums = imeiStr.match(/\d+/g);
+                    if (nums) {
+                        details.imeis = nums;
+                        if (!details.imei && nums.length > 0) {
+                            details.imei = nums[0];
+                        }
+                    }
+                }
+
+                // Extraer Serial Numbers: serialNumbers: G9C72111A152
+                var snMatch = text.match(/serialNumbers:\s*([A-Z0-9]+)/);
+                if (snMatch) {
+                    details.serialNumbers.push(snMatch[1]);
+                }
+
+                // Extraer Partner: partner: surfsight
+                var partnerMatch = text.match(/partner:\s*(\w+)/);
+                if (partnerMatch) {
+                    details.partner = partnerMatch[1];
+                }
+
+                // Extraer Tipo de Modificación: [Tipo de modificación]
+                var modMatch = text.match(/\[([Tt]ipo de modificación[^\]]*)\]/);
+                if (modMatch) {
+                    details.modificationType = modMatch[1];
+                }
+
+                // Extraer Usuario original entre corchetes: [jm@cesetti.com.ar]
+                var userMatch = text.match(/\[([a-zA-Z0-9@._-]+)\]/);
+                if (userMatch) {
+                    details.originalUser = userMatch[1];
+                }
+
+                // Extraer rango de tiempo: startTimeUtc: 2026-08-23T21:05:00Z, endTimeUtc: 2026-08-24T03:00:43Z
+                var startMatch = text.match(/startTimeUtc:\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/);
+                var endMatch = text.match(/endTimeUtc:\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/);
+                if (startMatch && endMatch) {
+                    details.timeRange = startMatch[1] + ' → ' + endMatch[1];
+                }
+
+                return details;
             }
 
             function renderResults(results) {
@@ -160,12 +266,36 @@
                     var userName = (audit.user && audit.user.name) ? audit.user.name : (audit.userName || 'Sistema');
                     var timestamp = audit.dateTime ? new Date(audit.dateTime).toLocaleString('es-AR') : 'N/A';
 
+                    // Parsear detalles especiales (Camera Services, etc)
+                    var parsedDetails = parseAuditDetails(audit);
+
+                    // Construir subtítulos con información extraída
+                    var subtitle = '<strong>Usuario:</strong> ' + userName;
+                    if (parsedDetails.originalUser) {
+                        subtitle += ' [' + parsedDetails.originalUser + ']';
+                    }
+                    subtitle += '<br><strong>Tipo:</strong> ' + (audit.entityType || 'N/A') + '<br>';
+
+                    if (parsedDetails.imei) {
+                        subtitle += '<strong>IMEI:</strong> ' + parsedDetails.imei + '<br>';
+                    }
+                    if (parsedDetails.imeis.length > 0) {
+                        subtitle += '<strong>IMEIs:</strong> ' + parsedDetails.imeis.join(', ') + '<br>';
+                    }
+                    if (parsedDetails.serialNumbers.length > 0) {
+                        subtitle += '<strong>S/N:</strong> ' + parsedDetails.serialNumbers.join(', ') + '<br>';
+                    }
+                    if (parsedDetails.partner) {
+                        subtitle += '<strong>Partner:</strong> ' + parsedDetails.partner + '<br>';
+                    }
+                    if (parsedDetails.timeRange) {
+                        subtitle += '<strong>Rango:</strong> ' + parsedDetails.timeRange + '<br>';
+                    }
+
+                    subtitle += '<strong>Fecha:</strong> ' + timestamp;
+
                     resultEl.innerHTML = '<strong style="display:block; color:#0076BE; margin-bottom:4px;">' + (audit.referenceId || audit.id || 'Sin título') + '</strong>' +
-                        '<div style="font-size:12px; color:#666;">' +
-                        '<strong>Usuario:</strong> ' + userName + '<br>' +
-                        '<strong>Tipo:</strong> ' + (audit.entityType || 'N/A') + '<br>' +
-                        '<strong>Fecha:</strong> ' + timestamp +
-                        '</div>';
+                        '<div style="font-size:12px; color:#666;">' + subtitle + '</div>';
 
                     resultEl.addEventListener('mouseover', function() {
                         resultEl.style.background = '#f0f4ff';
@@ -177,7 +307,8 @@
 
                     resultEl.addEventListener('click', function() {
                         log('📋 Detalles de: ' + (audit.referenceId || audit.id));
-                        log(JSON.stringify(audit, null, 2));
+                        log('Datos parseados: ' + JSON.stringify(parsedDetails, null, 2));
+                        log('Record completo: ' + JSON.stringify(audit, null, 2));
                     });
 
                     container.appendChild(resultEl);
