@@ -263,8 +263,8 @@
                     return;
                 }
 
-                var csvData = [];
-                csvData.push(['Nombre', 'Detalle', 'Usuario', 'Tipo', 'IMEIs', 'Partner', 'Fecha', 'ID Registro']);
+                var tableData = [];
+                tableData.push(['Nombre', 'Detalle', 'Usuario', 'Tipo', 'IMEIs', 'Partner', 'Fecha', 'ID Registro']);
 
                 rows.forEach(function(row) {
                     var titleEl = row.querySelector('strong');
@@ -284,31 +284,60 @@
                         var fecha = formatTimestamp(audit.dateTime);
                         var id = audit.id || '';
 
-                        csvData.push([title, detalle, usuario, tipo, imeis, partner, fecha, id]);
+                        tableData.push([title, detalle, usuario, tipo, imeis, partner, fecha, id]);
                     }
                 });
 
-                // Convertir a CSV
-                var csv = csvData.map(function(row) {
-                    return row.map(function(cell) {
-                        var escaped = (cell || '').toString().replace(/"/g, '""');
-                        return '"' + escaped + '"';
-                    }).join(',');
-                }).join('\n');
+                // Generar HTML con formato para Excel
+                var html = '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="utf-8">\n<style>\n';
+                html += 'body { font-family: Arial, sans-serif; font-size: 12px; }\n';
+                html += 'table { border-collapse: collapse; width: 100%; }\n';
+                html += 'th { background-color: #0076BE; color: white; padding: 12px; text-align: left; font-weight: bold; border: 1px solid #ddd; font-size: 13px; }\n';
+                html += 'td { padding: 10px; border: 1px solid #ddd; font-size: 12px; }\n';
+                html += 'tr:nth-child(even) { background-color: #f9fafc; }\n';
+                html += '.col-nombre { text-align: left; font-weight: 500; }\n';
+                html += '.col-detalle { text-align: left; }\n';
+                html += '.col-usuario { text-align: center; }\n';
+                html += '.col-tipo { text-align: center; background-color: #e3f2fd; }\n';
+                html += '.col-imeis { text-align: center; }\n';
+                html += '.col-partner { text-align: center; }\n';
+                html += '.col-fecha { text-align: center; }\n';
+                html += '.col-id { text-align: center; color: #666; }\n';
+                html += '</style>\n</head>\n<body>\n';
+                html += '<table>\n<thead>\n<tr>\n';
+
+                // Encabezados
+                var headers = ['Nombre', 'Detalle', 'Usuario', 'Tipo', 'IMEIs', 'Partner', 'Fecha', 'ID Registro'];
+                headers.forEach(function(header) {
+                    html += '<th>' + header + '</th>\n';
+                });
+                html += '</tr>\n</thead>\n<tbody>\n';
+
+                // Datos
+                var classes = ['col-nombre', 'col-detalle', 'col-usuario', 'col-tipo', 'col-imeis', 'col-partner', 'col-fecha', 'col-id'];
+                for (var i = 1; i < tableData.length; i++) {
+                    html += '<tr>\n';
+                    tableData[i].forEach(function(cell, idx) {
+                        html += '<td class="' + classes[idx] + '">' + (cell || '') + '</td>\n';
+                    });
+                    html += '</tr>\n';
+                }
+
+                html += '</tbody>\n</table>\n</body>\n</html>';
 
                 // Descargar archivo
-                var blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+                var blob = new Blob([html], {type: 'application/vnd.ms-excel;charset=utf-8;'});
                 var link = document.createElement('a');
                 var url = URL.createObjectURL(blob);
                 link.setAttribute('href', url);
-                link.setAttribute('download', 'audit_export_' + new Date().getTime() + '.csv');
+                link.setAttribute('download', 'audit_export_' + new Date().getTime() + '.xls');
                 link.style.visibility = 'hidden';
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
 
-                log('📥 Exportados ' + (csvData.length - 1) + ' registros a CSV');
-                showStatus('Exportación completada: ' + (csvData.length - 1) + ' registros', 'success');
+                log('📥 Exportados ' + (tableData.length - 1) + ' registros a Excel');
+                showStatus('Exportación completada: ' + (tableData.length - 1) + ' registros', 'success');
             }
 
             function parseAuditDetails(audit) {
