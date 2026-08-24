@@ -338,7 +338,12 @@
                 for (var i = 1; i < tableData.length; i++) {
                     html += '<tr>\n';
                     tableData[i].forEach(function(cell, idx) {
-                        html += '<td class="' + classes[idx] + '">' + (cell || '') + '</td>\n';
+                        // Para IMEIs (columna 4), agregar apóstrofo para forzar texto en Excel
+                        var cellContent = (cell || '');
+                        if (idx === 4 && cellContent) {
+                            cellContent = "'" + cellContent;
+                        }
+                        html += '<td class="' + classes[idx] + '">' + cellContent + '</td>\n';
                     });
                     html += '</tr>\n';
                 }
