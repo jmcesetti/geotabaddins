@@ -147,7 +147,7 @@
                 api.call('Get', {
                     typeName: 'Audit',
                     search: search,
-                    resultsLimit: 30000
+                    resultsLimit: 10000
                 }, function(results) {
                     log('✅ Se encontraron ' + results.length + ' auditorías');
 
@@ -182,6 +182,49 @@
                 });
             }
 
+            function applyClientFilters() {
+                if (searchResults.length === 0) return;
+
+                var auditImei = document.getElementById('auditImei').value;
+                var auditSerialNumber = document.getElementById('auditSerialNumber').value;
+                var auditDescription = document.getElementById('auditDescription').value;
+
+                var filtered = searchResults;
+
+                // Filtrar por descripción/nombre en tiempo real
+                if (auditDescription) {
+                    var searchText = auditDescription.toLowerCase();
+                    filtered = filtered.filter(function(audit) {
+                        var name = (audit.name || '').toLowerCase();
+                        // Búsqueda simple sin wildcards para filtro client-side
+                        return name.indexOf(searchText) !== -1;
+                    });
+                }
+
+                // Filtrar por IMEI y Serial Number
+                if (auditImei || auditSerialNumber) {
+                    filtered = filtered.filter(function(audit) {
+                        var parsed = parseAuditDetails(audit);
+                        var matchImei = true;
+                        var matchSN = true;
+
+                        if (auditImei) {
+                            matchImei = (parsed.imei && parsed.imei.toString() === auditImei.toString()) ||
+                                       (parsed.imeis && parsed.imeis.length > 0 && parsed.imeis.indexOf(auditImei) !== -1);
+                        }
+
+                        if (auditSerialNumber) {
+                            matchSN = parsed.serialNumbers && parsed.serialNumbers.indexOf(auditSerialNumber) !== -1;
+                        }
+
+                        return matchImei && matchSN;
+                    });
+                }
+
+                renderResults(filtered);
+                log('🔎 Filtro client-side: ' + filtered.length + ' resultados de ' + searchResults.length);
+            }
+
             function clearSearch() {
                 document.getElementById('auditType').value = '';
                 document.getElementById('auditUser').value = '';
@@ -203,7 +246,8 @@
                     timeRange: null,
                     partner: null,
                     modificationType: null,
-                    originalUser: null
+                    originalUser: null,
+                    changes: []
                 };
 
                 if (!audit.comment) return details;
@@ -247,10 +291,20 @@
                     details.partner = partnerMatch[1];
                 }
 
-                // Extraer Tipo de Modificación: [Tipo de modificación]
-                var modMatch = text.match(/\[([Tt]ipo de modificación[^\]]*)\]/);
-                if (modMatch) {
-                    details.modificationType = modMatch[1];
+                // Extraer cambios después de imeis/partner/etc
+                // Formato: "UserName: x - partner: y, imeis: [z], liveVideo: True, speedUnits: kmh"
+                // Buscar todo después de imeis: [...] o serialNumbers
+                var changesMatch = text.match(/(?:imeis:\s*\[[^\]]+\]|serialNumbers:\s*[^\,]+)\s*,\s*(.+)$/);
+                if (changesMatch) {
+                    var changesStr = changesMatch[1];
+                    // Dividir por comas y crear lista
+                    var changePairs = changesStr.split(',');
+                    changePairs.forEach(function(pair) {
+                        var trimmed = pair.trim();
+                        if (trimmed) {
+                            details.changes.push(trimmed);
+                        }
+                    });
                 }
 
                 // Extraer rango de tiempo: startTimeUtc: 2026-08-23T21:05:00Z, endTimeUtc: 2026-08-24T03:00:43Z
@@ -318,7 +372,14 @@
                     var timestamp = formatTimestamp(audit.dateTime);
 
                     // Construir subtítulos con información extraída
-                    var subtitle = '<strong>Usuario:</strong> ' + displayUser + '<br>';
+                    var subtitle = '';
+
+                    // Mostrar cambios si existen (Camera Services)
+                    if (parsedDetails.changes && parsedDetails.changes.length > 0) {
+                        subtitle += '<strong>Detalle:</strong> ' + parsedDetails.changes.join(', ') + '<br>';
+                    }
+
+                    subtitle += '<strong>Usuario:</strong> ' + displayUser + '<br>';
 
                     // Solo mostrar Tipo si es Camera Services o existe entityType
                     if (audit.name && audit.name.indexOf('Camera Services') !== -1) {
@@ -327,10 +388,13 @@
                         subtitle += '<strong>Tipo:</strong> ' + audit.entityType + '<br>';
                     }
 
-                    // Mostrar detalles parseados solo si hay datos
-                    if (parsedDetails.imei) {
+                    // Mostrar IMEIs (múltiples) o IMEI (único)
+                    if (parsedDetails.imeis && parsedDetails.imeis.length > 0) {
+                        subtitle += '<strong>IMEIs:</strong> ' + parsedDetails.imeis.join(', ') + '<br>';
+                    } else if (parsedDetails.imei) {
                         subtitle += '<strong>IMEI:</strong> ' + parsedDetails.imei + '<br>';
                     }
+
                     if (parsedDetails.partner) {
                         subtitle += '<strong>Partner:</strong> ' + parsedDetails.partner + '<br>';
                     }
@@ -360,6 +424,13 @@
 
             document.getElementById('auditSearchBtn').addEventListener('click', performSearch);
             document.getElementById('auditClearBtn').addEventListener('click', clearSearch);
+
+            // Filtro en tiempo real para el campo de Descripción/Nombre
+            document.getElementById('auditDescription').addEventListener('input', function() {
+                if (searchResults.length > 0) {
+                    applyClientFilters();
+                }
+            });
 
             geotab.addin.auditSearch = function(api_, state_) {
                 api = api_;
