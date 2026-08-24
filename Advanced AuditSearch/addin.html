@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <title>Advanced Audit Search</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js"></script>
 </head>
 <body>
     <div id="audit-addin-root" style="font-family:'Segoe UI',Roboto,Arial,sans-serif; color:#333; background:transparent; display:flex; justify-content:center; align-items:flex-start; padding:20px;">
@@ -60,6 +61,7 @@
             <div style="display:flex; gap:10px; margin-top:20px;">
                 <button id="auditSearchBtn" style="flex:1; background:#0076BE; color:white; padding:12px; border:none; border-radius:8px; font-size:16px; font-weight:600; cursor:pointer;">Buscar</button>
                 <button id="auditClearBtn" style="flex:1; background:#f0f4ff; color:#0076BE; padding:12px; border:1px solid #0076BE; border-radius:8px; font-size:16px; font-weight:600; cursor:pointer;">Limpiar</button>
+                <button id="auditExportBtn" style="flex:1; background:#28A745; color:white; padding:12px; border:none; border-radius:8px; font-size:16px; font-weight:600; cursor:pointer;">📊 Exportar Excel</button>
             </div>
 
             <div id="auditStatus" style="margin-top:15px; padding:12px; border-radius:8px; text-align:center; font-size:14px; display:none;"></div>
@@ -253,6 +255,64 @@
                 log('🧹 Búsqueda limpiada');
             }
 
+            function exportToExcel() {
+                var resultsContainer = document.getElementById('auditResultsContainer');
+                var rows = resultsContainer.querySelectorAll('div[style*="padding: 12px"]');
+
+                if (rows.length === 0) {
+                    showStatus('No hay resultados para exportar', 'error');
+                    return;
+                }
+
+                var excelData = [];
+                excelData.push(['Nombre', 'Detalle', 'Usuario', 'Tipo', 'IMEIs', 'Partner', 'Fecha', 'ID Registro']);
+
+                rows.forEach(function(row) {
+                    var titleEl = row.querySelector('strong');
+                    var title = titleEl ? titleEl.textContent : '';
+
+                    var audit = searchResults.find(function(a) {
+                        return (a.name || '') === title;
+                    });
+
+                    if (audit) {
+                        var parsed = parseAuditDetails(audit);
+                        var detalle = parsed.changes.join(', ') || '';
+                        var usuario = extractOriginalUser(audit.userName || '');
+                        var tipo = audit.name && audit.name.indexOf('Camera Services') !== -1 ? 'Camera Services' : (audit.entityType || '');
+                        var imeis = (parsed.imeis && parsed.imeis.length > 0 ? parsed.imeis.join(', ') : (parsed.imei || ''));
+                        var partner = parsed.partner || '';
+                        var fecha = formatTimestamp(audit.dateTime);
+                        var id = audit.id || '';
+
+                        excelData.push([title, detalle, usuario, tipo, imeis, partner, fecha, id]);
+                    }
+                });
+
+                // Crear workbook de Excel con SheetJS
+                var ws = XLSX.utils.aoa_to_sheet(excelData);
+                var wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Auditorías');
+
+                // Ajustar ancho de columnas
+                ws['!cols'] = [
+                    {wch: 30},  // Nombre
+                    {wch: 40},  // Detalle
+                    {wch: 25},  // Usuario
+                    {wch: 20},  // Tipo
+                    {wch: 25},  // IMEIs
+                    {wch: 15},  // Partner
+                    {wch: 20},  // Fecha
+                    {wch: 30}   // ID Registro
+                ];
+
+                // Descargar archivo
+                XLSX.writeFile(wb, 'audit_export_' + new Date().getTime() + '.xlsx');
+
+                log('📥 Exportados ' + (excelData.length - 1) + ' registros a Excel');
+                showStatus('Exportación completada: ' + (excelData.length - 1) + ' registros', 'success');
+            }
+
             function parseAuditDetails(audit) {
                 var details = {
                     imei: null,
@@ -439,6 +499,7 @@
 
             document.getElementById('auditSearchBtn').addEventListener('click', performSearch);
             document.getElementById('auditClearBtn').addEventListener('click', clearSearch);
+            document.getElementById('auditExportBtn').addEventListener('click', exportToExcel);
 
             // Filtro en tiempo real para el campo de Descripción/Nombre (con debounce de 300ms)
             document.getElementById('auditDescription').addEventListener('input', function() {
