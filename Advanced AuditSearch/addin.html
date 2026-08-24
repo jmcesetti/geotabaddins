@@ -193,14 +193,20 @@
 
                 var text = audit.comment || '';
 
+                // Extraer UserName del comment: UserName: jm@cesetti.com.ar
+                var userNameMatch = text.match(/UserName:\s*([a-zA-Z0-9@._-]+)/);
+                if (userNameMatch) {
+                    details.originalUser = userNameMatch[1];
+                }
+
                 // Extraer IMEI único: imei: 357660104542709
                 var imeiMatch = text.match(/imei:\s*(\d+)/);
                 if (imeiMatch) {
                     details.imei = imeiMatch[1];
                 }
 
-                // Extraer IMEIs múltiples: imeis: [357660104542709],[type]
-                var imeisMatch = text.match(/imeis:\s*\[([\d,\[\]]+)\]/);
+                // Extraer IMEIs múltiples: imeis: [357660104542709]
+                var imeisMatch = text.match(/imeis:\s*\[([^\]]+)\]/);
                 if (imeisMatch) {
                     var imeiStr = imeisMatch[1];
                     var nums = imeiStr.match(/\d+/g);
@@ -230,12 +236,6 @@
                     details.modificationType = modMatch[1];
                 }
 
-                // Extraer Usuario original entre corchetes: [jm@cesetti.com.ar]
-                var userMatch = text.match(/\[([a-zA-Z0-9@._-]+)\]/);
-                if (userMatch) {
-                    details.originalUser = userMatch[1];
-                }
-
                 // Extraer rango de tiempo: startTimeUtc: 2026-08-23T21:05:00Z, endTimeUtc: 2026-08-24T03:00:43Z
                 var startMatch = text.match(/startTimeUtc:\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/);
                 var endMatch = text.match(/endTimeUtc:\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/);
@@ -244,6 +244,31 @@
                 }
 
                 return details;
+            }
+
+            function formatTimestamp(dateTimeString) {
+                if (!dateTimeString) return 'N/A';
+                try {
+                    var date = new Date(dateTimeString);
+                    var day = date.getDate();
+                    var month = date.getMonth() + 1;
+                    var year = date.getFullYear();
+                    var hours = ('0' + date.getHours()).slice(-2);
+                    var minutes = ('0' + date.getMinutes()).slice(-2);
+                    var seconds = ('0' + date.getSeconds()).slice(-2);
+                    return day + '/' + month + '/' + year + ', ' + hours + ':' + minutes + ':' + seconds;
+                } catch (e) {
+                    return 'N/A';
+                }
+            }
+
+            function extractOriginalUser(userName) {
+                // Extraer email entre corchetes: media_prod_sa@geotab.com [jm@cesetti.com.ar]
+                var match = userName.match(/\[([a-zA-Z0-9@._-]+)\]/);
+                if (match) {
+                    return match[1];
+                }
+                return userName;
             }
 
             function renderResults(results) {
@@ -263,38 +288,39 @@
                     resultEl.style.cursor = 'pointer';
                     resultEl.style.transition = 'all 0.2s';
 
-                    var userName = (audit.user && audit.user.name) ? audit.user.name : (audit.userName || 'Sistema');
-                    var timestamp = audit.dateTime ? new Date(audit.dateTime).toLocaleString('es-AR') : 'N/A';
-
                     // Parsear detalles especiales (Camera Services, etc)
                     var parsedDetails = parseAuditDetails(audit);
 
-                    // Construir subtítulos con información extraída
-                    var subtitle = '<strong>Usuario:</strong> ' + userName;
-                    if (parsedDetails.originalUser) {
-                        subtitle += ' [' + parsedDetails.originalUser + ']';
-                    }
-                    subtitle += '<br><strong>Tipo:</strong> ' + (audit.entityType || 'N/A') + '<br>';
+                    // Título: siempre usar name (ej: "UserLogin", "Save Camera Settings", etc)
+                    var title = audit.name || audit.referenceId || audit.id || 'Sin título';
 
+                    // Usuario: extraer el original del userName si está entre corchetes
+                    var displayUser = extractOriginalUser(audit.userName || 'Sistema');
+
+                    // Timestamp formateado
+                    var timestamp = formatTimestamp(audit.dateTime);
+
+                    // Construir subtítulos con información extraída
+                    var subtitle = '<strong>Usuario:</strong> ' + displayUser + '<br>';
+
+                    // Solo mostrar Tipo si es Camera Services o existe entityType
+                    if (audit.name && audit.name.indexOf('Camera Services') !== -1) {
+                        subtitle += '<strong>Tipo:</strong> Camera Services<br>';
+                    } else if (audit.entityType) {
+                        subtitle += '<strong>Tipo:</strong> ' + audit.entityType + '<br>';
+                    }
+
+                    // Mostrar detalles parseados solo si hay datos
                     if (parsedDetails.imei) {
                         subtitle += '<strong>IMEI:</strong> ' + parsedDetails.imei + '<br>';
-                    }
-                    if (parsedDetails.imeis.length > 0) {
-                        subtitle += '<strong>IMEIs:</strong> ' + parsedDetails.imeis.join(', ') + '<br>';
-                    }
-                    if (parsedDetails.serialNumbers.length > 0) {
-                        subtitle += '<strong>S/N:</strong> ' + parsedDetails.serialNumbers.join(', ') + '<br>';
                     }
                     if (parsedDetails.partner) {
                         subtitle += '<strong>Partner:</strong> ' + parsedDetails.partner + '<br>';
                     }
-                    if (parsedDetails.timeRange) {
-                        subtitle += '<strong>Rango:</strong> ' + parsedDetails.timeRange + '<br>';
-                    }
 
                     subtitle += '<strong>Fecha:</strong> ' + timestamp;
 
-                    resultEl.innerHTML = '<strong style="display:block; color:#0076BE; margin-bottom:4px;">' + (audit.referenceId || audit.id || 'Sin título') + '</strong>' +
+                    resultEl.innerHTML = '<strong style="display:block; color:#0076BE; margin-bottom:4px;">' + title + '</strong>' +
                         '<div style="font-size:12px; color:#666;">' + subtitle + '</div>';
 
                     resultEl.addEventListener('mouseover', function() {
@@ -306,7 +332,7 @@
                     });
 
                     resultEl.addEventListener('click', function() {
-                        log('📋 Detalles de: ' + (audit.referenceId || audit.id));
+                        log('📋 Id.Registro : ' + audit.id);
                         log('Datos parseados: ' + JSON.stringify(parsedDetails, null, 2));
                         log('Record completo: ' + JSON.stringify(audit, null, 2));
                     });
