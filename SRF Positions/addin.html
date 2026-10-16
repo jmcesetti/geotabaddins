@@ -210,7 +210,10 @@ render_pipeline
                     devices[device.device.id] = {
                         bearing: device.bearing,
                         dateTime: device.dateTime,
-                        communicates: device.isDeviceCommunicating
+                        communicates: device.isDeviceCommunicating,
+                        // Posición del GO: se usa para centrar el mapa si la cámara no trae ubicación
+                        lat: device.latitude,
+                        lon: device.longitude
                     };
                 }
 
@@ -671,30 +674,28 @@ render_pipeline
                     }
                 });
 
-                // FILTRO DE COMUNICACIÓN: solo mostrar equipos cuyo GO tenga isDeviceCommunicating === false
-                // (es decir, el GO no está comunicando -> el equipo está potencialmente fuera de servicio)
-                // Criterio para equipos sin GTB_STATUSINFO:
-                //   - Si no se puede asociar a un GO (gtbId == null), se EXCLUYE del mapa
-                //     para no mostrar datos potencialmente desactualizados.
-                //   - Si el GO tiene status pero communicates === undefined/null, también se excluye.
-                combinedDevices = combinedDevices.filter(device => {
-                    if (!device.gtbId) {
-                        // Sin asociación a GO: excluir (ver comentario arriba)
-                        return false;
-                    }
-                    const statusInfo = GTB_STATUSINFO[device.gtbId];
+                // FILTRO DE COMUNICACIÓN (solo para el mapa): se dibujan los equipos cuyo GO tenga
+                // isDeviceCommunicating === false. Los que comunican ya los muestra el mapa nativo.
+                // device.mapState indica por qué se dibuja o no (lo muestra el panel):
+                //   'onMap'  -> GO no comunica, se dibuja
+                //   'goLive' -> GO comunica, lo muestra MyGeotab
+                //   'noGo'   -> no se pudo asociar a un GO o no hay status aún: no se dibuja
+                combinedDevices.forEach(device => {
+                    const statusInfo = device.gtbId ? GTB_STATUSINFO[device.gtbId] : null;
+                    device.goStatus = statusInfo || null;
                     if (!statusInfo) {
-                        // GO existe pero no hay info de status aún: excluir por precaución
-                        return false;
+                        device.mapState = 'noGo';
+                    } else if (statusInfo.communicates === false) {
+                        device.mapState = 'onMap';
+                    } else {
+                        device.mapState = 'goLive';
                     }
-                    // Solo mostrar si el GO NO está comunicando (isDeviceCommunicating === false)
-                    return statusInfo.communicates === false;
                 });
 
-                console.info("Devices printed (no comunicando):", combinedDevices.length);
-                devices = combinedDevices;
-                // Lista ya filtrada: la usan el panel, el buscador y los filtros de estado
+                // El panel lista TODAS las cámaras encontradas; el mapa solo las 'onMap'
                 allDevices = combinedDevices;
+                devices = combinedDevices.filter(device => device.mapState === 'onMap');
+                console.info("Devices printed (no comunicando):", devices.length);
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
                 if (!Array.isArray(devices) || devices.length === 0) {
@@ -840,8 +841,23 @@ render_pipeline
                             badgeStyle = 'background:#fef08a; color:#854d0e;';
                         }
 
-                        const locationStatus = (device.lat && device.lon) ? '✓ Ubicación disponible' : '✗ Ubicación no disponible';
-                        const locationStyle = (device.lat && device.lon) ? 'color:#065f46;' : 'color:#dc2626;';
+                        // Posición para centrar: la de la cámara; si no tiene, la última del GO asociado
+                        const goStatus = device.goStatus;
+                        const camHasLocation = !!(device.lat && device.lon);
+                        const goHasLocation = !!(goStatus && goStatus.lat && goStatus.lon);
+                        const target = camHasLocation ? { lat: device.lat, lon: device.lon }
+                                     : goHasLocation ? { lat: goStatus.lat, lon: goStatus.lon }
+                                     : null;
+
+                        const locationStatus = camHasLocation ? '✓ Ubicación de la cámara'
+                                             : goHasLocation ? '✓ Ubicación del GO (cámara sin posición)'
+                                             : '✗ Ubicación no disponible';
+                        const locationStyle = target ? 'color:#065f46;' : 'color:#dc2626;';
+
+                        // Badge de visibilidad en el mapa
+                        const mapBadge = device.mapState === 'onMap' ? { text: 'En mapa', style: 'background:#fee2e2; color:#991b1b;' }
+                                       : device.mapState === 'goLive' ? { text: 'GO comunicando', style: 'background:#e0f2fe; color:#075985;' }
+                                       : { text: 'Sin GO asociado', style: 'background:#f3f4f6; color:#6b7280;' };
 
                         // Badge de fuente (SRF / MKP / FCS)
                         const sourceBadgeColor = device.source === 'FCS' ? '#dbeafe; color:#1e40af;' :
@@ -852,7 +868,8 @@ render_pipeline
                             <div style="font-weight:700; font-size:14px; color:#1f2937; margin-bottom:8px; letter-spacing:-0.3px;">${device.name}</div>
                             <div style="font-size:12px; color:#6b7280; line-height:1.6;">
                                 <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span>
-                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; letter-spacing:0.3px; background:${sourceBadgeColor}">${device.source || 'SRF'}</span><br>
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; background:${sourceBadgeColor}">${device.source || 'SRF'}</span>
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; letter-spacing:0.3px; ${mapBadge.style}">${mapBadge.text}</span><br>
                                 <strong style="color:#374151; font-weight:600;">Última comunicación:</strong> ${dateFormatted}<br>
                                 <strong style="color:#374151; font-weight:600;">Velocidad:</strong> ${speed} km/h<br>
                                 <span style="font-size:11px; ${locationStyle}">${locationStatus}</span>
@@ -873,14 +890,15 @@ render_pipeline
                             }
                         });
 
-                        const hasLocation = device.lat && device.lon;
+                        const hasLocation = !!target;
                         row.style.cursor = hasLocation ? 'pointer' : 'not-allowed';
                         row.style.opacity = '1';
 
                         if (hasLocation) {
+                            // Centra el mapa aunque el equipo no esté dibujado por el add-in
                             row.addEventListener('click', async () => {
-                                const lat = parseFloat(device.lat);
-                                const lng = parseFloat(device.lon);
+                                const lat = parseFloat(target.lat);
+                                const lng = parseFloat(target.lon);
 
                                 try {
                                     const map = service.map;
@@ -1041,7 +1059,6 @@ render_pipeline
             // REDIBUJO: combina SRF + MKP + FCS y actualiza mapa, panel y status (cada 30s)
             function renderAll() {
                 const statusEl = elt.querySelector("#srf-status");
-                const countEl = elt.querySelector("#srf-device-count");
                 try {
                     const srf_devices = srf_lastDevices;
                     const combinedDevices = buildCombinedDevices(srf_devices, mkp_allDevices, fcs_allDevices);
@@ -1049,32 +1066,29 @@ render_pipeline
                     drawDevices(combinedDevices);
                     renderDevicesList(allDevices);
 
+                    // Contadores centralizados en el pie del panel (sobre la lista combinada, sin duplicados)
+                    const countBy = pred => allDevices.filter(pred).length;
+                    elt.querySelector("#srf-count-total").textContent = allDevices.length;
+                    elt.querySelector("#srf-count-map").textContent = countBy(d => d.mapState === 'onMap');
+                    elt.querySelector("#srf-count-live").textContent = countBy(d => d.mapState === 'goLive');
+                    const noGo = countBy(d => d.mapState === 'noGo');
+                    elt.querySelector("#srf-source-counts").textContent =
+                        `SRF ${countBy(d => (d.source || 'SRF') === 'SRF')} · MKP ${countBy(d => d.source === 'MKP')} · FCS ${countBy(d => d.source === 'FCS')}` +
+                        (noGo > 0 ? ` · ${noGo} sin GO asociado` : '');
+
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
                     if (combinedDevices.length === 0) {
                         statusEl.textContent = srf_statusError
                             ? `⚠ ${srf_statusError} - sin datos MKP/FCS (${timeStr})`
                             : `✗ No hay dispositivos disponibles (${timeStr})`;
                         statusEl.classList.add("srf-error");
-                        countEl.textContent = 0;
                         return;
                     }
 
-                    const srf_count = srf_devices.length;
-                    const mkp_count = mkp_allDevices.filter(d => !srf_devices.find(s => s.imei === d.imei)).length;
-                    const fcs_count = fcs_allDevices.filter(d =>
-                        !srf_devices.find(s => s.imei === d.imei) &&
-                        !mkp_allDevices.find(m => m.imei === d.imei)
-                    ).length;
-                    const parts = [];
-                    if (srf_count > 0) parts.push(`${srf_count} SRF`);
-                    if (mkp_count > 0) parts.push(`${mkp_count} MKP`);
-                    if (fcs_count > 0) parts.push(`${fcs_count} FCS`);
-                    const label = parts.length > 1 ? `${combinedDevices.length} (${parts.join(', ')})` : `${combinedDevices.length} ${parts[0] || ''}`;
                     statusEl.textContent = srf_statusError
-                        ? `✓ ${label} (sin SRF: ${srf_statusError}) a las ${timeStr}`
-                        : `✓ ${label} a las ${timeStr}`;
+                        ? `✓ Actualizado a las ${timeStr} (sin SRF: ${srf_statusError})`
+                        : `✓ Actualizado a las ${timeStr}`;
                     statusEl.classList.remove("srf-error");
-                    countEl.textContent = combinedDevices.length;
                 } catch (err) {
                     console.error("[RENDER]", err);
                     statusEl.textContent = `✗ ${err.message}`;
@@ -1091,7 +1105,6 @@ render_pipeline
                     <div id="srf-header" style="padding:20px; border-bottom:1px solid #e5e7eb; background:#f9fafb;">
                       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                         <h3 style="font-size:18px; font-weight:700; color:#1f2937; letter-spacing:-0.5px; margin:0;">SRF Positions</h3>
-                        <span id="srf-device-count" style="font-size:11px; font-weight:600; color:#6b7280; background:#e5e7eb; padding:4px 8px; border-radius:4px;">0</span>
                       </div>
                       <input type="text" id="srf-search" placeholder="Buscar por nombre..." style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:12px; background:white; color:#1f2937; box-sizing:border-box;">
                       <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -1100,11 +1113,18 @@ render_pipeline
                         <button class="srf-filter-btn-other" data-filter="standby" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En espera</button>
                         <button class="srf-filter-btn-other" data-filter="offline" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">Offline</button>
                       </div>
-                      <div id="fcs-status" style="margin-top:8px; padding:6px 10px; background:#eff6ff; color:#1e40af; border-radius:6px; font-size:11px; text-align:center; border:1px solid #bfdbfe; font-weight:500;">FCS: Inicializando...</div>
                     </div>
-                    <div id="srf-devices-container" style="height:540px; overflow-y:scroll; overflow-x:hidden; padding:12px; -webkit-overflow-scrolling:touch;"></div>
-                    <div id="srf-footer" style="padding:8px 12px; border-top:1px solid #e5e7eb; background:#f9fafb;">
-                      <div id="srf-status" style="padding:12px 12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500;">Inicializando...</div>
+                    <div id="srf-devices-container" style="flex:1; min-height:0; overflow-y:scroll; overflow-x:hidden; padding:12px; -webkit-overflow-scrolling:touch;"></div>
+                    <!-- Contadores centralizados -->
+                    <div id="srf-footer" style="padding:8px 12px; border-top:1px solid #e5e7eb; background:#f9fafb; font-size:11px; color:#4b5563;">
+                      <div style="display:flex; justify-content:space-between; gap:6px; margin-bottom:6px; text-align:center;">
+                        <div style="flex:1; background:white; border:1px solid #e5e7eb; border-radius:6px; padding:6px 4px;"><div id="srf-count-total" style="font-size:16px; font-weight:700; color:#1f2937;">0</div>Encontradas</div>
+                        <div style="flex:1; background:white; border:1px solid #e5e7eb; border-radius:6px; padding:6px 4px;"><div id="srf-count-map" style="font-size:16px; font-weight:700; color:#991b1b;">0</div>En mapa</div>
+                        <div style="flex:1; background:white; border:1px solid #e5e7eb; border-radius:6px; padding:6px 4px;"><div id="srf-count-live" style="font-size:16px; font-weight:700; color:#075985;">0</div>GO comunicando</div>
+                      </div>
+                      <div id="srf-source-counts" style="text-align:center; margin-bottom:6px;">SRF – · MKP – · FCS –</div>
+                      <div id="fcs-status" style="text-align:center; margin-bottom:6px;">FCS: Inicializando...</div>
+                      <div id="srf-status" style="padding:8px 12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500;">Inicializando...</div>
                     </div>
                   </div>
                   <div id="srf-map" style="flex:1; background:white;"></div>
