@@ -38,6 +38,14 @@ render_pipeline
     <div id="addin-root"></div>
 
     <script>
+        // Logs informativos y de diagnóstico: apagados. Poner en true para depurar.
+        // Los errores reales (console.error) se loguean siempre.
+        const DEBUG = false;
+        const dbg = (...args) => { if (DEBUG) console.log(...args); };
+        // Mensajes de inicialización (una vez al cargar el add-in): siempre visibles
+        const initLog = (...args) => console.log(...args);
+        let status_loggedInit = false;
+
         let commitMessage = "";
 
         let gtbIdsAssigned = false;
@@ -72,7 +80,7 @@ render_pipeline
                     commitMessage = commits[0].commit.message.split('\n')[0];
                 }
             } catch (err) {
-                console.error("[debug] Could not fetch commit message:", err);
+                dbg("[debug] Could not fetch commit message:", err);
             }
         }
 
@@ -168,7 +176,7 @@ render_pipeline
                 const database = session.database;
                 var devices = {};
                 try {
-                    // console.info("------------------- [GTB] -------------------");
+                    // dbg("------------------- [GTB] -------------------");
                     const api = ApiHelpers.getApi();
                     const devices = {};
 
@@ -209,7 +217,7 @@ render_pipeline
 
                 const api = ApiHelpers.getApi();
                 if (!api) {
-                    console.warn("[StatusInfo] API no inicializada todavía");
+                    dbg("[StatusInfo] API no inicializada todavía");
                     return;
                 }
 
@@ -230,7 +238,8 @@ render_pipeline
                 }
 
                 GTB_STATUSINFO = devices;
-                console.log(`[StatusInfo] ${Object.keys(devices).length} GO, ${Object.values(devices).filter(d => d.communicates === false).length} sin comunicar`);
+                (status_loggedInit ? dbg : initLog)(`[StatusInfo] ${Object.keys(devices).length} GO, ${Object.values(devices).filter(d => d.communicates === false).length} sin comunicar`);
+                status_loggedInit = true;
 
             } catch (err) {
                 console.error("[GTB] Error:", err);
@@ -287,7 +296,7 @@ render_pipeline
 
             const delay = srf_tokenRetryDelays[Math.min(srf_tokenRetryIndex, srf_tokenRetryDelays.length - 1)];
             const delayMin = delay / 60000;
-            console.log(`[SRF] Reintentando token en ${delayMin}m...`);
+            dbg(`[SRF] Reintentando token en ${delayMin}m...`);
 
             srf_tokenCheckTimeoutId = setTimeout(async () => {
                 const isValid = await srf_checkTokenValidity();
@@ -297,7 +306,7 @@ render_pipeline
                     srf_tokenCheckTimeoutId = null;
                     // El intervalo de SRF retoma la consulta solo (chequea srf_isTokenValid)
                     // y renderAll() lo dibuja en el próximo ciclo de 30s.
-                    console.log("[SRF] Token válido nuevamente");
+                    dbg("[SRF] Token válido nuevamente");
                 } else {
                     srf_tokenRetryIndex++;
                     srf_scheduleTokenRetry();
@@ -355,7 +364,7 @@ render_pipeline
                 mkp_snMap = {};
                 mkp_deviceMappings.forEach(m => { mkp_snMap[m.imei] = m.sn; });
 
-                console.log(`[MKP] DeviceMappings: ${items.length} recibidos, ${mkp_deviceMappings.length} con cámara+GO, ` +
+                initLog(`[MKP] DeviceMappings: ${items.length} recibidos, ${mkp_deviceMappings.length} con cámara+GO, ` +
                     `${mkp_deviceMappings.filter(m => m.imei.startsWith('G')).length} Focus (G...)`);
                 return mkp_deviceMappings;
             } catch (err) {
@@ -385,7 +394,7 @@ render_pipeline
                 const data = await response.json();
                 return data;
             } catch (err) {
-                console.error(`[MKP] fetchMarketplaceDeviceByImei failed:`, err.message);
+                dbg(`[MKP] fetchMarketplaceDeviceByImei failed:`, err.message);
                 return null;
             }
         }
@@ -412,7 +421,7 @@ render_pipeline
                 lastSeenOnline: r.data.lastSeenOnline,
                 source: 'MKP'
             }));
-            console.log(`[MKP] Refresh: ${mkp_allDevices.length}/${results.length} OK`);
+            dbg(`[MKP] Refresh: ${mkp_allDevices.length}/${results.length} OK`);
             return mkp_allDevices;
         }
 
@@ -429,7 +438,7 @@ render_pipeline
             );
             mkp_validDevices = results.filter(r => r.data).map(r => ({ sn: r.sn, imei: r.imei }));
             // mkp_snMap ya se armó en mkp_getDeviceMappings con todos los mappings
-            console.log(`[MKP] OrganizationDevices: ${mkp_validDevices.length}/${results.length} cámaras respondieron`);
+            initLog(`[MKP] OrganizationDevices: ${mkp_validDevices.length}/${results.length} cámaras respondieron`);
             mkp_allDevices = results.filter(r => r.data).map(r => ({
                 sn: r.sn,
                 imei: r.imei,
@@ -464,7 +473,7 @@ render_pipeline
                         licensePlate: device.licensePlate
                     };
                 }
-                console.log(`[FCS] Cargados ${raw_devices.length} dispositivos GTB`);
+                initLog(`[FCS] Cargados ${raw_devices.length} dispositivos GTB`);
             } catch (err) {
                 console.error("[FCS] Error cargando nombres de dispositivos GTB:", err);
             }
@@ -494,17 +503,17 @@ render_pipeline
 
             try {
                 results = await api.api.multiCall(calls);
-                console.log(`[FCS] multiCall OK: ${results.length} respuestas`);
+                dbg(`[FCS] multiCall OK: ${results.length} respuestas`);
             } catch (err) {
                 // Si multiCall falla entero, intentar de a uno
-                console.warn("[FCS] multiCall falló, intentando de a uno:", err.message);
+                dbg("[FCS] multiCall falló, intentando de a uno:", err.message);
                 results = [];
                 for (const call of calls) {
                     try {
                         const r = await api.api.call(call[0], call[1]);
                         results.push(r);
                     } catch (e) {
-                        console.warn(`[FCS] Error en call individual para ${call[1].search.deviceSearch.id}:`, e.message);
+                        dbg(`[FCS] Error en call individual para ${call[1].search.deviceSearch.id}:`, e.message);
                         results.push([]);
                     }
                 }
@@ -536,16 +545,16 @@ render_pipeline
                 let fallbackResults = null;
                 try {
                     fallbackResults = await api.api.multiCall(fallbackCalls);
-                    console.log(`[FCS] Fallback multiCall OK: ${fallbackResults.length} respuestas para ${fallbackCalls.length} devices`);
+                    dbg(`[FCS] Fallback multiCall OK: ${fallbackResults.length} respuestas para ${fallbackCalls.length} devices`);
                 } catch (err) {
-                    console.warn("[FCS] Fallback multiCall falló, intentando de a uno:", err.message);
+                    dbg("[FCS] Fallback multiCall falló, intentando de a uno:", err.message);
                     fallbackResults = [];
                     for (const call of fallbackCalls) {
                         try {
                             const r = await api.api.call(call[0], call[1]);
                             fallbackResults.push(r);
                         } catch (e) {
-                            console.warn(`[FCS] Error en fallback individual:`, e.message);
+                            dbg(`[FCS] Error en fallback individual:`, e.message);
                             fallbackResults.push([]);
                         }
                     }
@@ -576,12 +585,12 @@ render_pipeline
             const focusMappings = mkp_deviceMappings.filter(m => m.imei && m.imei.startsWith('G'));
 
             if (focusMappings.length === 0) {
-                console.log("[FCS] Sin cámaras Focus en los mappings");
+                dbg("[FCS] Sin cámaras Focus en los mappings");
                 fcs_allDevices = [];
                 return fcs_allDevices;
             }
 
-            console.log(`[FCS] Procesando ${focusMappings.length} cámaras Focus`);
+            dbg(`[FCS] Procesando ${focusMappings.length} cámaras Focus`);
 
             let logResults;
             try {
@@ -628,7 +637,7 @@ render_pipeline
                 };
             }).filter(d => d !== null);
 
-            console.log(`[FCS] Refresh: ${fcs_allDevices.filter(d => d.lat && d.lon).length}/${fcs_allDevices.length} con ubicación`);
+            dbg(`[FCS] Refresh: ${fcs_allDevices.filter(d => d.lat && d.lon).length}/${fcs_allDevices.length} con ubicación`);
             return fcs_allDevices;
         }
 
@@ -674,7 +683,7 @@ render_pipeline
 //--------------------------------------------------- JM ----------------------------------------------------------------
 //devices
                 let combinedDevices = devices;
-                console.info("Devices enqued:", devices.length);
+                dbg("Devices enqued:", devices.length);
 
                 // Construir mapa serialNumber->gtbId para asociar cada device con su GO
                 const serialToId = {};
@@ -736,16 +745,16 @@ render_pipeline
                 // El panel lista TODAS las cámaras encontradas; el mapa solo las 'onMap'
                 allDevices = combinedDevices;
                 devices = combinedDevices.filter(device => device.mapState === 'onMap');
-                console.info("Devices printed (no comunicando):", devices.length);
+                dbg("Devices printed (no comunicando):", devices.length);
 
                 // DIAGNÓSTICO: por qué se dibuja o no cada cámara
                 const stateCounts = {};
                 combinedDevices.forEach(d => { stateCounts[d.mapState] = (stateCounts[d.mapState] || 0) + 1; });
-                console.info("[RENDER] mapState:", JSON.stringify(stateCounts),
+                dbg("[RENDER] mapState:", JSON.stringify(stateCounts),
                     "| GTB_DEVICES:", Object.keys(GTB_DEVICES).length,
                     "| GTB_STATUSINFO:", Object.keys(GTB_STATUSINFO).length,
                     "| onMap con ubicación de cámara:", devices.filter(d => d.lat && d.lon).length);
-                console.table(combinedDevices.map(d => ({
+                DEBUG && console.table(combinedDevices.map(d => ({
                     name: d.name, source: d.source, imei: d.imei, sn: d.sn, gtbId: d.gtbId, match: d.gtbMatch || (d.gtbId ? 'sn' : '-'),
                     communicates: d.goStatus ? d.goStatus.communicates : '(sin status)',
                     mapState: d.mapState, lat: d.lat, lon: d.lon
@@ -1000,7 +1009,7 @@ render_pipeline
                     await service.page.set("assetStatus", "!(d,s)");
                     const state = await service.page.get();
                     await service.page.go("map", Object.assign({}, state, { assetStatus: ["d", "s"] }));
-                    console.log("[MAP] Filtro assetStatus aplicado: solo GO comunicando");
+                    initLog("[MAP] Filtro assetStatus aplicado: solo GO comunicando");
                 } catch (err) {
                     console.error("[MAP] No se pudo aplicar el filtro assetStatus:", err);
                 }
@@ -1098,7 +1107,7 @@ render_pipeline
                         return device;
                     });
                     srf_statusError = null;
-                    console.log(`[SRF] Refresh: ${srf_lastDevices.length} OK`);
+                    dbg(`[SRF] Refresh: ${srf_lastDevices.length} OK`);
                 } catch (err) {
                     console.error("[SRF]", err);
                     srf_lastDevices = [];
@@ -1206,6 +1215,7 @@ render_pipeline
                         orgIdsData = await srf_getOrgIdsFromGeotab();
 
                         await srf_refreshData(orgIdsData);
+                        initLog(`[SRF] Pipeline iniciado: ${srf_lastDevices.length} cámaras (${orgIdsData.orgIdsFromCsv.length} org)`);
                         // Solo datos: el redibujo lo hace renderAll() cada 30s
                         srf_regularRefreshIntervalId = setInterval(() => {
                             if (srf_isTokenValid && orgIdsData) {
@@ -1266,7 +1276,7 @@ render_pipeline
                             }
                         }, 30000);
 
-                        console.log(`[FCS] Pipeline iniciado: ${fcs_allDevices.length} cámaras Focus`);
+                        initLog(`[FCS] Pipeline iniciado: ${fcs_allDevices.length} cámaras Focus`);
                     } catch (err) {
                         console.error("[FCS] Initialization failed:", err);
                         const fcsStatusEl = elt.querySelector("#fcs-status");
@@ -1288,7 +1298,7 @@ render_pipeline
         };
 
         getLastCommitMessage().then(() => {
-            console.log("[APP] Script loaded");
+            initLog("[APP] Script loaded");
         });
     </script>
 </body>
