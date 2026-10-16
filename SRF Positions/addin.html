@@ -453,6 +453,29 @@ render_pipeline
             return results;
         }
 
+        // Consulta manual de DeviceMappings (botón del panel): loguea la respuesta completa
+        async function mkp_testRequest() {
+            try {
+                const session = await ApiHelpers.getSessionPromise();
+                const response = await fetch("https://media-services.geotab.com/api/DeviceMappings", {
+                    method: 'GET',
+                    headers: {
+                        'x-mygeotab-database': encodeURIComponent(session.database),
+                        'x-mygeotab-path': session.domain,
+                        'x-mygeotab-sessionid': session.sessionId,
+                        'x-mygeotab-username': session.userName
+                    }
+                });
+
+                const data = await response.json();
+                console.log(`[TEST] DeviceMappings (HTTP ${response.status}):`, data);
+                return { success: response.ok, data };
+            } catch (err) {
+                console.error("[TEST] DeviceMappings ERROR:", err.message);
+                return { success: false, error: err.message };
+            }
+        }
+
         // ====== FCS (FOCUS) PIPELINE ======
         // Obtiene el mapa serialNumber->nombre de los Device de Geotab.
         // Se usa para nombrar las cámaras FCS por el nombre del GO asociado.
@@ -479,7 +502,7 @@ render_pipeline
             }
         }
 
-        // Obtiene los LogRecord para una lista de partnerDeviceIds (IDs de cámara Focus en Geotab).
+        // Obtiene los LogRecord para una lista de { deviceId } (Device de Geotab de cada cámara Focus).
         // Usa api.multiCall para batchear. Si el multiCall falla, intenta de a uno.
         async function fcs_fetchLogRecords(focusMappings) {
             const api = ApiHelpers.getApi();
@@ -569,83 +592,101 @@ render_pipeline
             return results;
         }
 
-        // Convierte los LogRecord de Geotab en objetos de la misma forma que SRF/MKP
+        // Lista de cámaras Focus (Get Camera): se carga UNA vez al iniciar el add-in.
+        // Cada Camera trae cameraSerialNumber (cámara) y deviceSerialNumber (GO asociado).
+        let fcs_cameras = [];
+
+        async function fcs_loadCameras() {
+            const api = ApiHelpers.getApi();
+            const cameras = await api.api.call("Get", { typeName: "Camera" });
+            const now = new Date();
+            fcs_cameras = (cameras || []).filter(c =>
+                c.cameraSerialNumber &&
+                (c.vendor === 'Geotab' || c.cameraSerialNumber.startsWith('G')) &&
+                (!c.activeTo || new Date(c.activeTo) > now)
+            );
+            initLog(`[FCS] Camera: ${(cameras || []).length} recibidas, ${fcs_cameras.length} Focus activas`);
+            return fcs_cameras;
+        }
+
+        // Estado de las cámaras (Get CameraStatus) indexado por camera.id
+        async function fcs_fetchCameraStatus() {
+            const api = ApiHelpers.getApi();
+            const statuses = await api.api.call("Get", { typeName: "CameraStatus" });
+            const byCameraId = {};
+            (statuses || []).forEach(s => {
+                if (s.camera && s.camera.id) byCameraId[s.camera.id] = s;
+            });
+            return byCameraId;
+        }
+
+        // CameraStatus.status ("Online", "Offline", ...) -> estados del panel
+        function fcs_mapCameraStatus(status) {
+            const s = String(status || '').toLowerCase();
+            if (s === 'online') return 'online';
+            if (s === 'offline' || s === '') return 'offline';
+            return 'standby';
+        }
+
+        // Cada 30s: CameraStatus + LogRecord, sobre la lista de Camera cargada al inicio
         async function fcs_refreshData() {
-            // Esperar a que MKP haya cargado los mappings (mkp_deviceMappings los tiene)
-            // Si mkp_initPromise no se resolvió aún, esperar.
-            if (mkp_initPromise) {
-                try {
-                    await mkp_initPromise;
-                } catch (e) {
-                    // Si MKP falló, igual intentar con lo que hay
-                }
+            if (fcs_cameras.length === 0) {
+                fcs_allDevices = [];
+                return fcs_allDevices;
             }
 
-            // Filtrar mappings de cámaras Focus: partnerDeviceId empieza con "G".
-            // deviceId: id interno del Device de la cámara en Geotab (ej. "b4A3"), buscado por serialNumber.
-            // El partnerDeviceId es el serial; usarlo directo en deviceSearch no devuelve registros.
+            // Device de Geotab para pedir LogRecord: el de la cámara si existe como Device;
+            // si no, el GO asociado (deviceSerialNumber).
             const snToId = {};
             Object.values(GTB_DEVICES).forEach(d => { if (d.sn) snToId[d.sn] = d.id; });
-            const focusMappings = mkp_deviceMappings
-                .filter(m => m.imei && m.imei.startsWith('G'))
-                .map(m => Object.assign({}, m, { deviceId: snToId[m.imei] || m.imei }));
-            dbg(`[FCS] ${focusMappings.filter(m => snToId[m.imei]).length}/${focusMappings.length} cámaras Focus encontradas como Device en Geotab`);
+            const focusCameras = fcs_cameras.map(c => ({
+                camera: c,
+                deviceId: snToId[c.cameraSerialNumber] || snToId[c.deviceSerialNumber] || null
+            }));
+            const withDevice = focusCameras.filter(fc => fc.deviceId);
+            dbg(`[FCS] ${withDevice.length}/${focusCameras.length} cámaras con Device para LogRecord`);
 
-            if (focusMappings.length === 0) {
-                dbg("[FCS] Sin cámaras Focus en los mappings");
-                fcs_allDevices = [];
-                return fcs_allDevices;
-            }
-
-            dbg(`[FCS] Procesando ${focusMappings.length} cámaras Focus`);
-
-            let logResults;
+            let statusByCameraId = {};
             try {
-                logResults = await fcs_fetchLogRecords(focusMappings);
+                statusByCameraId = await fcs_fetchCameraStatus();
             } catch (err) {
-                console.error("[FCS] Error obteniendo LogRecords:", err);
-                fcs_allDevices = [];
-                return fcs_allDevices;
+                console.error("[FCS] Error obteniendo CameraStatus:", err);
             }
 
-            fcs_allDevices = focusMappings.map((mapping, idx) => {
-                const records = Array.isArray(logResults[idx]) ? logResults[idx] : [];
-                const record = records[0] || null;
-                // Estado de la cámara: su propio DeviceStatusInfo (isDeviceCommunicating). Sin dato -> según haya registro.
-                const camStatus = GTB_STATUSINFO[mapping.deviceId];
-                const camStatusText = camStatus ? (camStatus.communicates === false ? 'offline' : 'online') : null;
-
-                // Nombre: usar el nombre del Device de Geotab cuyo sn == associatedDeviceSerialNumber
-                // Si no existe, usar el partnerDeviceId (id de cámara)
-                const gtbName = fcs_gtbDeviceNameBySn[mapping.sn] || null;
-                const name = gtbName || mapping.imei;
-
-                if (!record) {
-                    return {
-                        sn: mapping.sn,
-                        imei: mapping.imei,
-                        name: name,
-                        lat: null,
-                        lon: null,
-                        speed: 0,
-                        status: camStatusText || 'offline',
-                        lastSeenOnline: null,
-                        source: 'FCS'
-                    };
+            let logResults = [];
+            if (withDevice.length > 0) {
+                try {
+                    logResults = await fcs_fetchLogRecords(withDevice);
+                } catch (err) {
+                    console.error("[FCS] Error obteniendo LogRecords:", err);
+                    logResults = [];
                 }
+            }
+            const recordByCameraId = {};
+            withDevice.forEach((fc, idx) => {
+                const records = Array.isArray(logResults[idx]) ? logResults[idx] : [];
+                if (records[0]) recordByCameraId[fc.camera.id] = records[0];
+            });
+
+            fcs_allDevices = focusCameras.map(({ camera }) => {
+                const record = recordByCameraId[camera.id] || null;
+                const camStatus = statusByCameraId[camera.id] || null;
+
+                // Nombre: el del GO asociado; si no existe, el serial de la cámara
+                const name = fcs_gtbDeviceNameBySn[camera.deviceSerialNumber] || camera.cameraSerialNumber;
 
                 return {
-                    sn: mapping.sn,
-                    imei: mapping.imei,
+                    sn: camera.deviceSerialNumber,
+                    imei: camera.cameraSerialNumber,
                     name: name,
-                    lat: record.latitude,
-                    lon: record.longitude,
-                    speed: Math.round(record.speed || 0),
-                    status: camStatusText || 'online',
-                    lastSeenOnline: record.dateTime,
+                    lat: record ? record.latitude : null,
+                    lon: record ? record.longitude : null,
+                    speed: record ? Math.round(record.speed || 0) : 0,
+                    status: camStatus ? fcs_mapCameraStatus(camStatus.status) : (record ? 'online' : 'offline'),
+                    lastSeenOnline: camStatus ? camStatus.lastUpdated : (record ? record.dateTime : null),
                     source: 'FCS'
                 };
-            }).filter(d => d !== null);
+            });
 
             dbg(`[FCS] Refresh: ${fcs_allDevices.filter(d => d.lat && d.lon).length}/${fcs_allDevices.length} con ubicación`);
             return fcs_allDevices;
@@ -1028,6 +1069,21 @@ render_pipeline
             function setupEventListeners() {
                 const searchInput = elt.querySelector("#srf-search");
                 const filterBtns = elt.querySelectorAll("[data-filter]");
+                const testBtn = elt.querySelector("#srf-test-btn");
+
+                // Consulta manual de DeviceMappings: la respuesta va a la consola (siempre, sin depender de DEBUG)
+                testBtn.addEventListener('click', async () => {
+                    testBtn.disabled = true;
+                    testBtn.style.opacity = '0.6';
+                    testBtn.textContent = '⏳ Consultando...';
+                    const result = await mkp_testRequest();
+                    testBtn.disabled = false;
+                    testBtn.style.opacity = '1';
+                    testBtn.textContent = result.success ? '✓ DeviceMappings' : '✗ DeviceMappings';
+                    setTimeout(() => {
+                        testBtn.textContent = '🧪 DeviceMappings';
+                    }, 3000);
+                });
 
                 searchInput.addEventListener('input', (e) => {
                     currentSearch = e.target.value;
@@ -1184,6 +1240,7 @@ render_pipeline
                     <div id="srf-header" style="padding:20px; border-bottom:1px solid #e5e7eb; background:#f9fafb;">
                       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                         <h3 style="font-size:18px; font-weight:700; color:#1f2937; letter-spacing:-0.5px; margin:0;">Cameras Positions</h3>
+                        <button id="srf-test-btn" title="Consulta DeviceMappings y muestra la respuesta en la consola" style="padding:4px 8px; border:1px solid #8b5cf6; background:#8b5cf6; color:white; border-radius:4px; font-size:11px; font-weight:500; cursor:pointer;">🧪 DeviceMappings</button>
                       </div>
                       <input type="text" id="srf-search" placeholder="Buscar por nombre..." style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:12px; background:white; color:#1f2937; box-sizing:border-box;">
                       <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -1264,11 +1321,8 @@ render_pipeline
                         // Cargar nombres GTB (también rellena GTB_DEVICES usado por el filtro de comunicación)
                         await fcs_loadGtbDeviceNames();
 
-                        // Esperar a que MKP haya cargado los mappings (fcs_refreshData lo hace internamente,
-                        // pero mkp_initPromise puede no estar asignado aún; lo esperamos aquí explícitamente)
-                        if (mkp_initPromise) {
-                            try { await mkp_initPromise; } catch (e) { /* continuar si MKP falló */ }
-                        }
+                        // Lista de cámaras Focus (una vez); ya no depende de DeviceMappings
+                        await fcs_loadCameras();
 
                         await fcs_refreshData();
 
