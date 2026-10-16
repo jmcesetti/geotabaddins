@@ -3,7 +3,7 @@
 		getsession (usaremos las credenciales en mkp pipeline)
 		devices (one time)
 			devicemappings (one time)
-			(agregar partnerDeviceId (lo llamaremos "imei") a devices, vincular por serialNumber y associatedDeviceSerialNumber respectivamente) 	
+			(agregar partnerDeviceId (lo llamaremos "imei") a devices, vincular por serialNumber y associatedDeviceSerialNumber respectivamente)
 			devicestatusinfo (60s interval)
 			(agregar a devices "IsDeviceCommunicating" que viene en devicestatusinfo)
 
@@ -16,18 +16,16 @@ srf_pipeline
 	getunion.csv (6h interval, si no hay id de SRF se DETIENE EL PIPELINE INDEFINIDAMENTE)
 	srf_getDevicesByOrgId (10s interval, consultamos SOLO cuando hallamos id SRF)
 
+fcs_pipeline
+	reusar devicemappings de mkp (mappings cuyo partnerDeviceId empiece con "G")
+	para cada uno, obtener LogRecord via api.multiCall (30s interval)
+
 render_pipeline
-	traemos mkp y srf como "combined" (Interval 10s, Tomamos los datos de mkp y srf SOLO SI LOS PIPELINES ESTAN CORRIENDO, quiere decir que hay datos)
+	traemos mkp, srf y fcs como "combined" (Interval 10s, Tomamos los datos SOLO SI LOS PIPELINES ESTAN CORRIENDO)
 		unificamos los datos en (lat, lon, imei, lastreport) (null para los vacios)
-	traemos devices (10s interval)
-		mostramos los activos en el panel lateral antes de filtrar
-		filtramos los devices según "IsDeviceCommunicating" = false
+	filtramos por "IsDeviceCommunicating" = false (GTB_STATUSINFO via gtbId)
 	vinculamos los devices con combined por imei
 	renderizamos solo aquellos devices con lat y lon <> null
-		en el tooltip y mostramos:
-			"name" - "licenseplate"
-			"speed"
-			"lastreport"
 
 ```html
 <!DOCTYPE html>
@@ -77,6 +75,11 @@ render_pipeline
         const srf_tokenRetryDelays = [60000, 180000, 300000, 600000];
         let srf_tokenRetryIndex = 0;
         let mkp_initPromise = null;
+
+        // ====== FCS PIPELINE - variables ======
+        let fcs_allDevices = [];
+        let fcs_refreshIntervalId = null;
+        let fcs_initPromise = null;
 
         const ApiHelpers = (() => {
             let _api = null;
@@ -391,7 +394,8 @@ render_pipeline
                 lon: r.data.lon,
                 speed: Math.round(r.data.speed),
                 status: r.data.status,
-                lastSeenOnline: r.data.lastSeenOnline
+                lastSeenOnline: r.data.lastSeenOnline,
+                source: 'MKP'
             }));
             console.log(`[MKP] Refresh: ${mkp_allDevices.length}/${results.length} OK`);
             return mkp_allDevices;
@@ -421,7 +425,8 @@ render_pipeline
                 lon: r.data.lon,
                 speed: Math.round(r.data.speed),
                 status: r.data.status,
-                lastSeenOnline: r.data.lastSeenOnline
+                lastSeenOnline: r.data.lastSeenOnline,
+                source: 'MKP'
             }));
             return results;
         }
@@ -448,6 +453,194 @@ render_pipeline
                 console.error("[TEST] ERROR:", err.message);
                 return { success: false, error: err.message };
             }
+        }
+
+        // ====== FCS (FOCUS) PIPELINE ======
+        // Obtiene el mapa serialNumber->nombre de los Device de Geotab.
+        // Se usa para nombrar las cámaras FCS por el nombre del GO asociado.
+        let fcs_gtbDeviceNameBySn = {};
+
+        async function fcs_loadGtbDeviceNames() {
+            try {
+                const api = ApiHelpers.getApi();
+                const raw_devices = await api.api.call("Get", { typeName: "Device" });
+                fcs_gtbDeviceNameBySn = {};
+                GTB_DEVICES = {};
+                for (const device of raw_devices) {
+                    fcs_gtbDeviceNameBySn[device.serialNumber] = device.name;
+                    GTB_DEVICES[device.id] = {
+                        id: device.id,
+                        sn: device.serialNumber,
+                        name: device.name,
+                        licensePlate: device.licensePlate
+                    };
+                }
+                console.log(`[FCS] Cargados ${raw_devices.length} dispositivos GTB`);
+            } catch (err) {
+                console.error("[FCS] Error cargando nombres de dispositivos GTB:", err);
+            }
+        }
+
+        // Obtiene los LogRecord para una lista de partnerDeviceIds (IDs de cámara Focus en Geotab).
+        // Usa api.multiCall para batchear. Si el multiCall falla, intenta de a uno.
+        async function fcs_fetchLogRecords(focusMappings) {
+            const api = ApiHelpers.getApi();
+            const now = new Date().toISOString();
+
+            // Construir llamadas multiCall: una por cámara
+            const calls = focusMappings.map(m => [
+                "Get",
+                {
+                    typeName: "LogRecord",
+                    search: {
+                        deviceSearch: { id: m.imei },
+                        fromDate: now,
+                        toDate: now
+                    },
+                    resultsLimit: 1
+                }
+            ]);
+
+            let results = null;
+
+            try {
+                results = await api.api.multiCall(calls);
+                console.log(`[FCS] multiCall OK: ${results.length} respuestas`);
+            } catch (err) {
+                // Si multiCall falla entero, intentar de a uno
+                console.warn("[FCS] multiCall falló, intentando de a uno:", err.message);
+                results = [];
+                for (const call of calls) {
+                    try {
+                        const r = await api.api.call(call[0], call[1]);
+                        results.push(r);
+                    } catch (e) {
+                        console.warn(`[FCS] Error en call individual para ${call[1].search.deviceSearch.id}:`, e.message);
+                        results.push([]);
+                    }
+                }
+            }
+
+            // Si algún device no devolvió registros, fallback a DeviceStatusInfo (última posición conocida).
+            // No se usa LogRecord con fromDate sin toDate: el orden es ascendente y resultsLimit:1 traería el más viejo.
+            // DeviceStatusInfo trae latitude/longitude/speed/dateTime con los mismos nombres que LogRecord.
+            const fallbackCalls = [];
+            const fallbackIndices = [];
+
+            results.forEach((res, idx) => {
+                if (!Array.isArray(res) || res.length === 0) {
+                    fallbackCalls.push([
+                        "Get",
+                        {
+                            typeName: "DeviceStatusInfo",
+                            search: {
+                                deviceSearch: { id: focusMappings[idx].imei }
+                            },
+                            resultsLimit: 1
+                        }
+                    ]);
+                    fallbackIndices.push(idx);
+                }
+            });
+
+            if (fallbackCalls.length > 0) {
+                let fallbackResults = null;
+                try {
+                    fallbackResults = await api.api.multiCall(fallbackCalls);
+                    console.log(`[FCS] Fallback multiCall OK: ${fallbackResults.length} respuestas para ${fallbackCalls.length} devices`);
+                } catch (err) {
+                    console.warn("[FCS] Fallback multiCall falló, intentando de a uno:", err.message);
+                    fallbackResults = [];
+                    for (const call of fallbackCalls) {
+                        try {
+                            const r = await api.api.call(call[0], call[1]);
+                            fallbackResults.push(r);
+                        } catch (e) {
+                            console.warn(`[FCS] Error en fallback individual:`, e.message);
+                            fallbackResults.push([]);
+                        }
+                    }
+                }
+                fallbackIndices.forEach((origIdx, i) => {
+                    if (fallbackResults[i] && fallbackResults[i].length > 0) {
+                        results[origIdx] = fallbackResults[i];
+                    }
+                });
+            }
+
+            return results;
+        }
+
+        // Convierte los LogRecord de Geotab en objetos de la misma forma que SRF/MKP
+        async function fcs_refreshData() {
+            // Esperar a que MKP haya cargado los mappings (mkp_deviceMappings los tiene)
+            // Si mkp_initPromise no se resolvió aún, esperar.
+            if (mkp_initPromise) {
+                try {
+                    await mkp_initPromise;
+                } catch (e) {
+                    // Si MKP falló, igual intentar con lo que hay
+                }
+            }
+
+            // Filtrar mappings de cámaras Focus: partnerDeviceId empieza con "G"
+            const focusMappings = mkp_deviceMappings.filter(m => m.imei && m.imei.startsWith('G'));
+
+            if (focusMappings.length === 0) {
+                console.log("[FCS] Sin cámaras Focus en los mappings");
+                fcs_allDevices = [];
+                return fcs_allDevices;
+            }
+
+            console.log(`[FCS] Procesando ${focusMappings.length} cámaras Focus`);
+
+            let logResults;
+            try {
+                logResults = await fcs_fetchLogRecords(focusMappings);
+            } catch (err) {
+                console.error("[FCS] Error obteniendo LogRecords:", err);
+                fcs_allDevices = [];
+                return fcs_allDevices;
+            }
+
+            fcs_allDevices = focusMappings.map((mapping, idx) => {
+                const records = Array.isArray(logResults[idx]) ? logResults[idx] : [];
+                const record = records[0] || null;
+
+                // Nombre: usar el nombre del Device de Geotab cuyo sn == associatedDeviceSerialNumber
+                // Si no existe, usar el partnerDeviceId (id de cámara)
+                const gtbName = fcs_gtbDeviceNameBySn[mapping.sn] || null;
+                const name = gtbName || mapping.imei;
+
+                if (!record) {
+                    return {
+                        sn: mapping.sn,
+                        imei: mapping.imei,
+                        name: name,
+                        lat: null,
+                        lon: null,
+                        speed: 0,
+                        status: 'offline',
+                        lastSeenOnline: null,
+                        source: 'FCS'
+                    };
+                }
+
+                return {
+                    sn: mapping.sn,
+                    imei: mapping.imei,
+                    name: name,
+                    lat: record.latitude,
+                    lon: record.longitude,
+                    speed: Math.round(record.speed || 0),
+                    status: 'online',
+                    lastSeenOnline: record.dateTime,
+                    source: 'FCS'
+                };
+            }).filter(d => d !== null);
+
+            console.log(`[FCS] Refresh: ${fcs_allDevices.filter(d => d.lat && d.lon).length}/${fcs_allDevices.length} con ubicación`);
+            return fcs_allDevices;
         }
 
         geotab.addin.srfPositions = function (elt, service) {
@@ -491,26 +684,49 @@ render_pipeline
                 clearDevices();
 //--------------------------------------------------- JM ----------------------------------------------------------------
 //devices
-                combinedDevices = devices
+                let combinedDevices = devices;
                 console.info("Devices enqued:", devices.length);
-                // console.info("[GTB] Assigning GTB IDs...");
 
+                // Construir mapa serialNumber->gtbId para asociar cada device con su GO
                 const serialToId = {};
                 Object.values(GTB_DEVICES).forEach(device => {
                     serialToId[device.sn] = device.id;
                 });
 
+                // Asignar gtbId a cada device usando el sn (serialNumber del GO asociado)
+                // y mostrar el nombre del Device de Geotab en lugar del SN / modelo
                 combinedDevices.forEach(device => {
                     device.gtbId = serialToId[device.sn] ?? null;
+                    const gtbDevice = device.gtbId ? GTB_DEVICES[device.gtbId] : null;
+                    if (gtbDevice && gtbDevice.name) {
+                        device.name = gtbDevice.name;
+                    }
                 });
 
-                // combinedDevices = combinedDevices.filter(device => {
-                //     const status = GTB_STATUSINFO[device.gtbId];
-                //     return device.gtbId && status && !status.communicates;
-                // });
+                // FILTRO DE COMUNICACIÓN: solo mostrar equipos cuyo GO tenga isDeviceCommunicating === false
+                // (es decir, el GO no está comunicando -> el equipo está potencialmente fuera de servicio)
+                // Criterio para equipos sin GTB_STATUSINFO:
+                //   - Si no se puede asociar a un GO (gtbId == null), se EXCLUYE del mapa
+                //     para no mostrar datos potencialmente desactualizados.
+                //   - Si el GO tiene status pero communicates === undefined/null, también se excluye.
+                combinedDevices = combinedDevices.filter(device => {
+                    if (!device.gtbId) {
+                        // Sin asociación a GO: excluir (ver comentario arriba)
+                        return false;
+                    }
+                    const statusInfo = GTB_STATUSINFO[device.gtbId];
+                    if (!statusInfo) {
+                        // GO existe pero no hay info de status aún: excluir por precaución
+                        return false;
+                    }
+                    // Solo mostrar si el GO NO está comunicando (isDeviceCommunicating === false)
+                    return statusInfo.communicates === false;
+                });
 
-                console.info("Devices printed:", combinedDevices.length);
+                console.info("Devices printed (no comunicando):", combinedDevices.length);
                 devices = combinedDevices;
+                // Lista ya filtrada: la usan el panel, el buscador y los filtros de estado
+                allDevices = combinedDevices;
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
                 if (!Array.isArray(devices) || devices.length === 0) {
@@ -659,10 +875,16 @@ render_pipeline
                         const locationStatus = (device.lat && device.lon) ? '✓ Ubicación disponible' : '✗ Ubicación no disponible';
                         const locationStyle = (device.lat && device.lon) ? 'color:#065f46;' : 'color:#dc2626;';
 
+                        // Badge de fuente (SRF / MKP / FCS)
+                        const sourceBadgeColor = device.source === 'FCS' ? '#dbeafe; color:#1e40af;' :
+                                                 device.source === 'MKP' ? '#ede9fe; color:#5b21b6;' :
+                                                 '#fef9c3; color:#713f12;';
+
                         row.innerHTML = `
                             <div style="font-weight:700; font-size:14px; color:#1f2937; margin-bottom:8px; letter-spacing:-0.3px;">${device.name}</div>
                             <div style="font-size:12px; color:#6b7280; line-height:1.6;">
-                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span><br>
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span>
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; letter-spacing:0.3px; background:${sourceBadgeColor}">${device.source || 'SRF'}</span><br>
                                 <strong style="color:#374151; font-weight:600;">Última comunicación:</strong> ${dateFormatted}<br>
                                 <strong style="color:#374151; font-weight:600;">Velocidad:</strong> ${speed} km/h<br>
                                 <span style="font-size:11px; ${locationStyle}">${locationStatus}</span>
@@ -725,10 +947,106 @@ render_pipeline
                 });
             }
 
+            // PRUEBA TEMPORAL (borrar al terminar): cambia el estado de la página del mapa
+            // con service.page para filtrar assetStatus (d = conduciendo, s = detenido).
+            function setupPageStateTest() {
+                const logEl = elt.querySelector("#pg-test-log");
+                let originalState = null;
+
+                const log = (msg, data) => {
+                    const line = `[${new Date().toLocaleTimeString('es-AR', { hour12: false })}] ${msg}` +
+                        (data !== undefined ? " " + JSON.stringify(data) : "");
+                    console.log("[PG-TEST]", msg, data);
+                    logEl.textContent += line + "\n";
+                    logEl.scrollTop = logEl.scrollHeight;
+                };
+                const wait = ms => new Promise(r => setTimeout(r, ms));
+
+                const readState = async (label) => {
+                    try {
+                        const state = await service.page.get();
+                        log(`${label} page.get():`, state);
+                        return state;
+                    } catch (err) {
+                        log(`${label} page.get() ERROR:`, err && err.message ? err.message : String(err));
+                        return null;
+                    }
+                };
+
+                const trySet = async (value) => {
+                    if (originalState === null) originalState = await readState("antes");
+                    try {
+                        const ok = await service.page.set("assetStatus", value);
+                        log(`set("assetStatus", ${JSON.stringify(value)}) =>`, ok);
+                    } catch (err) {
+                        log(`set("assetStatus", ${JSON.stringify(value)}) ERROR:`, err && err.message ? err.message : String(err));
+                    }
+                    await wait(1500);
+                    await readState("después");
+                    log("¿El mapa ocultó los que no comunican? Mirá el mapa y la URL.");
+                };
+
+                // Loguear cambios de estado que informe el mapa (si el evento existe)
+                ["stateChange", "change"].forEach(evt => {
+                    try {
+                        service.page.attach(evt, data => log(`evento page "${evt}":`, data));
+                    } catch (err) {
+                        log(`attach("${evt}") no disponible:`, err && err.message ? err.message : String(err));
+                    }
+                });
+
+                elt.querySelectorAll("[data-pgtest]").forEach(btn => {
+                    btn.addEventListener('click', async () => {
+                        switch (btn.dataset.pgtest) {
+                            case "get":
+                                await readState("actual");
+                                break;
+                            case "set1":
+                                await trySet("!(d,s)");
+                                break;
+                            case "set2":
+                                await trySet("d,s");
+                                break;
+                            case "set3":
+                                await trySet(["d", "s"]);
+                                break;
+                            case "go": {
+                                const state = (await readState("antes de go")) || {};
+                                if (originalState === null) originalState = state;
+                                try {
+                                    const ok = await service.page.go("map", Object.assign({}, state, { assetStatus: ["d", "s"] }));
+                                    log('go("map", {...state, assetStatus:["d","s"]}) =>', ok);
+                                } catch (err) {
+                                    log("go ERROR:", err && err.message ? err.message : String(err));
+                                }
+                                break;
+                            }
+                            case "restore": {
+                                if (!originalState) {
+                                    log("Nada para restaurar (no se cambió el estado todavía).");
+                                    break;
+                                }
+                                try {
+                                    const ok = await service.page.set("assetStatus", originalState.assetStatus ?? "");
+                                    log("restaurado assetStatus a:", originalState.assetStatus ?? "");
+                                    log("resultado:", ok);
+                                } catch (err) {
+                                    log("restore ERROR:", err && err.message ? err.message : String(err));
+                                }
+                                break;
+                            }
+                        }
+                    });
+                });
+            }
+
             function setupEventListeners() {
                 const searchInput = elt.querySelector("#srf-search");
                 const filterBtns = elt.querySelectorAll("[data-filter]");
                 const testBtn = elt.querySelector("#srf-test-btn");
+
+                // PRUEBA TEMPORAL: ver si service.page puede cambiar el filtro assetStatus del mapa
+                setupPageStateTest();
 
                 searchInput.addEventListener('input', (e) => {
                     currentSearch = e.target.value;
@@ -777,24 +1095,59 @@ render_pipeline
                 });
             }
 
+            // Merge de los 3 pipelines: SRF + MKP + FCS
+            // Prioridad de deduplicación: SRF > MKP > FCS (por imei)
+            // Pipelines sin datos simplemente se ignoran.
+            function buildCombinedDevices(srf_devices, mkp_devices, fcs_devices) {
+                const seenImeis = new Set();
+                const combined = [];
+
+                // 1. SRF primero (mayor prioridad)
+                for (const d of srf_devices) {
+                    if (d.imei && seenImeis.has(d.imei)) continue;
+                    if (d.imei) seenImeis.add(d.imei);
+                    combined.push(Object.assign({}, d, { source: d.source || 'SRF' }));
+                }
+
+                // 2. MKP solo si el imei no vino de SRF
+                for (const d of mkp_devices) {
+                    if (d.imei && seenImeis.has(d.imei)) continue;
+                    if (d.imei) seenImeis.add(d.imei);
+                    combined.push(Object.assign({}, d, { source: 'MKP' }));
+                }
+
+                // 3. FCS solo si el imei no vino de SRF ni MKP
+                for (const d of fcs_devices) {
+                    if (d.imei && seenImeis.has(d.imei)) continue;
+                    if (d.imei) seenImeis.add(d.imei);
+                    combined.push(Object.assign({}, d, { source: 'FCS' }));
+                }
+
+                return combined;
+            }
+
             async function loadAndDisplay(orgIdsData) {
                 const statusEl = elt.querySelector("#srf-status");
                 const countEl = elt.querySelector("#srf-device-count");
                 try {
                     if (!srf_isTokenValid) {
-                        statusEl.textContent = "⚠ Token SRF inválido - mostrando MKP";
+                        statusEl.textContent = "⚠ Token SRF inválido - mostrando MKP/FCS";
                         statusEl.classList.add("srf-error");
                         if (!srf_tokenCheckTimeoutId) {
                             srf_scheduleTokenRetry();
                         }
-                        // Intentar mostrar dispositivos MKP aunque SRF falle
-                        if (mkp_allDevices.length > 0) {
-                            drawDevices(mkp_allDevices);
-                            renderDevicesList(mkp_allDevices);
+                        // Fallback: mostrar MKP y/o FCS aunque SRF falle
+                        const fallbackCombined = buildCombinedDevices([], mkp_allDevices, fcs_allDevices);
+                        if (fallbackCombined.length > 0) {
+                            drawDevices(fallbackCombined);
+                            renderDevicesList(allDevices);
                             const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                            statusEl.textContent = `✓ ${mkp_allDevices.length} MKP (sin SRF) a las ${timeStr}`;
+                            const mkpCount = mkp_allDevices.length;
+                            const fcsCount = fcs_allDevices.length;
+                            const label = [mkpCount > 0 ? `${mkpCount} MKP` : null, fcsCount > 0 ? `${fcsCount} FCS` : null].filter(Boolean).join(', ');
+                            statusEl.textContent = `✓ ${fallbackCombined.length} (sin SRF: ${label}) a las ${timeStr}`;
                             statusEl.classList.remove("srf-error");
-                            countEl.textContent = mkp_allDevices.length;
+                            countEl.textContent = fallbackCombined.length;
                         }
                         return;
                     }
@@ -811,13 +1164,11 @@ render_pipeline
                         });
                         console.log(`[SRF] Refresh: ${srf_devices.length}/${srf_devices.length} OK`);
                     } catch (err) {
-                        console.log("[SRF] No devices available, showing MKP only");
+                        console.log("[SRF] No devices available, showing MKP/FCS only");
                         srf_devices = [];
                     }
 
-                    const srf_imeiSet = new Set(srf_devices.map(d => d.imei).filter(Boolean));
-                    const mkp_onlyDevices = mkp_allDevices.filter(d => !srf_imeiSet.has(d.imei));
-                    const combinedDevices = [...srf_devices, ...mkp_onlyDevices];
+                    const combinedDevices = buildCombinedDevices(srf_devices, mkp_allDevices, fcs_allDevices);
 
                     if (combinedDevices.length === 0) {
                         statusEl.textContent = "✗ No hay dispositivos disponibles";
@@ -825,13 +1176,19 @@ render_pipeline
                         return;
                     }
                     drawDevices(combinedDevices);
-                    renderDevicesList(combinedDevices);
+                    renderDevicesList(allDevices);
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
                     const srf_count = srf_devices.length;
-                    const mkp_count = mkp_onlyDevices.length;
-                    const label = srf_count > 0 && mkp_count > 0 ? `${combinedDevices.length} (${srf_count} SRF, ${mkp_count} MKP)` :
-                                  mkp_count > 0 ? `${mkp_count} MKP` :
-                                  `${srf_count} SRF`;
+                    const mkp_count = mkp_allDevices.filter(d => !srf_devices.find(s => s.imei === d.imei)).length;
+                    const fcs_count = fcs_allDevices.filter(d =>
+                        !srf_devices.find(s => s.imei === d.imei) &&
+                        !mkp_allDevices.find(m => m.imei === d.imei)
+                    ).length;
+                    const parts = [];
+                    if (srf_count > 0) parts.push(`${srf_count} SRF`);
+                    if (mkp_count > 0) parts.push(`${mkp_count} MKP`);
+                    if (fcs_count > 0) parts.push(`${fcs_count} FCS`);
+                    const label = parts.length > 1 ? `${combinedDevices.length} (${parts.join(', ')})` : `${combinedDevices.length} ${parts[0] || ''}`;
                     statusEl.textContent = `✓ ${label} a las ${timeStr}`;
                     statusEl.classList.remove("srf-error");
                     countEl.textContent = combinedDevices.length;
@@ -839,19 +1196,20 @@ render_pipeline
                     console.error("[ERR]", err);
                     if (err.message === "TokenInvalid") {
                         srf_isTokenValid = false;
-                        statusEl.textContent = "⚠ Token SRF inválido - mostrando MKP";
+                        statusEl.textContent = "⚠ Token SRF inválido - mostrando MKP/FCS";
                         statusEl.classList.add("srf-error");
                         if (!srf_tokenCheckTimeoutId) {
                             srf_scheduleTokenRetry();
                         }
-                        // Mostrar MKP como fallback
-                        if (mkp_allDevices.length > 0) {
-                            drawDevices(mkp_allDevices);
-                            renderDevicesList(mkp_allDevices);
+                        // Fallback: MKP + FCS
+                        const fallbackCombined = buildCombinedDevices([], mkp_allDevices, fcs_allDevices);
+                        if (fallbackCombined.length > 0) {
+                            drawDevices(fallbackCombined);
+                            renderDevicesList(allDevices);
                             const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                            statusEl.textContent = `✓ ${mkp_allDevices.length} MKP (sin SRF) a las ${timeStr}`;
+                            statusEl.textContent = `✓ ${fallbackCombined.length} (sin SRF) a las ${timeStr}`;
                             statusEl.classList.remove("srf-error");
-                            countEl.textContent = mkp_allDevices.length;
+                            countEl.textContent = fallbackCombined.length;
                         }
                     } else {
                         statusEl.textContent = `✗ ${err.message}`;
@@ -879,8 +1237,22 @@ render_pipeline
                         <button class="srf-filter-btn-other" data-filter="offline" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">Offline</button>
                       </div>
                       <button id="srf-test-btn" style="width:100%; margin-top:12px; padding:8px 12px; border:1px solid #d1d5db; background:#8b5cf6; color:white; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s; border-color:#8b5cf6;">🧪 Probar DeviceMappings</button>
+                      <!-- PRUEBA TEMPORAL: service.page / assetStatus -->
+                      <div id="pg-test" style="margin-top:8px; padding:8px; border:1px dashed #f59e0b; border-radius:6px; background:#fffbeb;">
+                        <div style="font-size:11px; font-weight:700; color:#92400e; margin-bottom:6px;">🧪 Prueba filtro mapa (temporal)</div>
+                        <div style="display:flex; flex-wrap:wrap; gap:4px;">
+                          <button data-pgtest="get" style="font-size:11px; padding:4px 6px;">Leer estado</button>
+                          <button data-pgtest="set1" style="font-size:11px; padding:4px 6px;">set "!(d,s)"</button>
+                          <button data-pgtest="set2" style="font-size:11px; padding:4px 6px;">set "d,s"</button>
+                          <button data-pgtest="set3" style="font-size:11px; padding:4px 6px;">set ["d","s"]</button>
+                          <button data-pgtest="go" style="font-size:11px; padding:4px 6px;">go("map")</button>
+                          <button data-pgtest="restore" style="font-size:11px; padding:4px 6px;">Restaurar</button>
+                        </div>
+                        <pre id="pg-test-log" style="margin:6px 0 0; max-height:120px; overflow:auto; font-size:10px; white-space:pre-wrap; background:white; padding:4px; border:1px solid #fde68a; user-select:text;"></pre>
+                      </div>
+                      <div id="fcs-status" style="margin-top:8px; padding:6px 10px; background:#eff6ff; color:#1e40af; border-radius:6px; font-size:11px; text-align:center; border:1px solid #bfdbfe; font-weight:500;">FCS: Inicializando...</div>
                     </div>
-                    <div id="srf-devices-container" style="height:565px; overflow-y:scroll; overflow-x:hidden; padding:12px; -webkit-overflow-scrolling:touch;"></div>
+                    <div id="srf-devices-container" style="height:540px; overflow-y:scroll; overflow-x:hidden; padding:12px; -webkit-overflow-scrolling:touch;"></div>
                     <div id="srf-footer" style="padding:8px 12px; border-top:1px solid #e5e7eb; background:#f9fafb;">
                       <div id="srf-status" style="padding:12px 12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500;">Inicializando...</div>
                     </div>
@@ -911,23 +1283,24 @@ render_pipeline
                         if (err.message.includes("No matching OrgIds found")) {
                             statusEl.textContent = "Sin SRF Id para esta organización";
                         } else {
-                            statusEl.textContent = "Error en SRF - intentando MKP...";
+                            statusEl.textContent = "Error en SRF - intentando MKP/FCS...";
                         }
                         statusEl.classList.add("srf-error");
 
-                        // Esperar a que MKP termine de inicializarse antes de mostrar fallback
+                        // Esperar a que MKP y FCS terminen de inicializarse antes de mostrar fallback
                         try {
-                            await mkp_initPromise;
-                            if (mkp_allDevices.length > 0) {
-                                drawDevices(mkp_allDevices);
-                                renderDevicesList(mkp_allDevices);
+                            await Promise.allSettled([mkp_initPromise, fcs_initPromise]);
+                            const fallbackCombined = buildCombinedDevices([], mkp_allDevices, fcs_allDevices);
+                            if (fallbackCombined.length > 0) {
+                                drawDevices(fallbackCombined);
+                                renderDevicesList(allDevices);
                                 const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                                statusEl.textContent = `✓ ${mkp_allDevices.length} MKP a las ${timeStr}`;
+                                statusEl.textContent = `✓ ${fallbackCombined.length} (MKP+FCS) a las ${timeStr}`;
                                 statusEl.classList.remove("srf-error");
-                                elt.querySelector("#srf-device-count").textContent = mkp_allDevices.length;
+                                elt.querySelector("#srf-device-count").textContent = fallbackCombined.length;
                             }
-                        } catch (mkpErr) {
-                            console.error("[MKP] Fallback:", mkpErr.message);
+                        } catch (fallbackErr) {
+                            console.error("[Fallback] Error en fallback MKP/FCS:", fallbackErr.message);
                         }
                     }
                 })();
@@ -945,7 +1318,46 @@ render_pipeline
                     }
                 })();
 
+                // FCS (FOCUS) PIPELINE
+                // Arranca en paralelo a SRF y MKP.
+                // Carga los nombres de dispositivos GTB primero, luego refresca posiciones via LogRecord.
+                fcs_initPromise = (async () => {
+                    try {
+                        const fcsStatusEl = elt.querySelector("#fcs-status");
+                        if (fcsStatusEl) fcsStatusEl.textContent = "FCS: Cargando dispositivos GTB...";
 
+                        // Cargar nombres GTB (también rellena GTB_DEVICES usado por el filtro de comunicación)
+                        await fcs_loadGtbDeviceNames();
+
+                        // Esperar a que MKP haya cargado los mappings (fcs_refreshData lo hace internamente,
+                        // pero mkp_initPromise puede no estar asignado aún; lo esperamos aquí explícitamente)
+                        if (mkp_initPromise) {
+                            try { await mkp_initPromise; } catch (e) { /* continuar si MKP falló */ }
+                        }
+
+                        await fcs_refreshData();
+
+                        if (fcsStatusEl) {
+                            const withLoc = fcs_allDevices.filter(d => d.lat && d.lon).length;
+                            fcsStatusEl.textContent = `FCS: ${fcs_allDevices.length} cámaras (${withLoc} con ubicación)`;
+                        }
+
+                        fcs_refreshIntervalId = setInterval(async () => {
+                            await fcs_refreshData();
+                            const fcsEl = elt.querySelector("#fcs-status");
+                            if (fcsEl) {
+                                const withLoc = fcs_allDevices.filter(d => d.lat && d.lon).length;
+                                fcsEl.textContent = `FCS: ${fcs_allDevices.length} cámaras (${withLoc} con ubicación)`;
+                            }
+                        }, 30000);
+
+                        console.log(`[FCS] Pipeline iniciado: ${fcs_allDevices.length} cámaras Focus`);
+                    } catch (err) {
+                        console.error("[FCS] Initialization failed:", err);
+                        const fcsStatusEl = elt.querySelector("#fcs-status");
+                        if (fcsStatusEl) fcsStatusEl.textContent = "FCS: Error al inicializar";
+                    }
+                })();
 
             }).catch(err => {
                 console.error("[Session]", err.message);
