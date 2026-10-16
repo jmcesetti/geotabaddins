@@ -45,16 +45,24 @@ render_pipeline
         let GTB_STATUSINFO = {};
 
         // StatusInfo PIPELINE
-        status_initPromise = (async () => {
-            try {
-                await status_refreshData();
-                status_refreshIntervalId = setInterval(() => {
-                    status_refreshData();
-                }, 30000);
-            } catch (err) {
-                console.error("[StatusInfo] Initialization failed:", err);
-            }
-        })();
+        // Se arranca desde el add-in, después de ApiHelpers.init(): antes la API todavía no existe
+        // y la primera carga fallaba, dejando GTB_STATUSINFO vacío en el primer render.
+        let status_initPromise = null;
+        let status_refreshIntervalId = null;
+
+        function status_start() {
+            status_initPromise = (async () => {
+                try {
+                    await status_refreshData();
+                    status_refreshIntervalId = setInterval(() => {
+                        status_refreshData();
+                    }, 30000);
+                } catch (err) {
+                    console.error("[StatusInfo] Initialization failed:", err);
+                }
+            })();
+            return status_initPromise;
+        }
 
         async function getLastCommitMessage() {
             try {
@@ -199,7 +207,11 @@ render_pipeline
         async function status_refreshData() {
             try {
 
-                const api = await ApiHelpers.getApi();
+                const api = ApiHelpers.getApi();
+                if (!api) {
+                    console.warn("[StatusInfo] API no inicializada todavía");
+                    return;
+                }
 
                 const raw_devices = await api.api.call("Get", {
                     typeName: "DeviceStatusInfo"
@@ -218,7 +230,7 @@ render_pipeline
                 }
 
                 GTB_STATUSINFO = devices;
-                // console.info(GTB_STATUSINFO);
+                console.log(`[StatusInfo] ${Object.keys(devices).length} GO, ${Object.values(devices).filter(d => d.communicates === false).length} sin comunicar`);
 
             } catch (err) {
                 console.error("[GTB] Error:", err);
@@ -679,12 +691,15 @@ render_pipeline
                 // device.mapState indica por qué se dibuja o no (lo muestra el panel):
                 //   'onMap'  -> GO no comunica, se dibuja
                 //   'goLive' -> GO comunica, lo muestra MyGeotab
-                //   'noGo'   -> no se pudo asociar a un GO o no hay status aún: no se dibuja
+                //   'noGo'     -> no se pudo asociar a un GO: no se dibuja
+                //   'noStatus' -> hay GO pero no tenemos su DeviceStatusInfo: no se dibuja
                 combinedDevices.forEach(device => {
                     const statusInfo = device.gtbId ? GTB_STATUSINFO[device.gtbId] : null;
                     device.goStatus = statusInfo || null;
-                    if (!statusInfo) {
+                    if (!device.gtbId) {
                         device.mapState = 'noGo';
+                    } else if (!statusInfo) {
+                        device.mapState = 'noStatus';
                     } else if (statusInfo.communicates === false) {
                         device.mapState = 'onMap';
                     } else {
@@ -857,6 +872,7 @@ render_pipeline
                         // Badge de visibilidad en el mapa
                         const mapBadge = device.mapState === 'onMap' ? { text: 'En mapa', style: 'background:#fee2e2; color:#991b1b;' }
                                        : device.mapState === 'goLive' ? { text: 'GO comunicando', style: 'background:#e0f2fe; color:#075985;' }
+                                       : device.mapState === 'noStatus' ? { text: 'Sin estado del GO', style: 'background:#fef3c7; color:#92400e;' }
                                        : { text: 'Sin GO asociado', style: 'background:#f3f4f6; color:#6b7280;' };
 
                         // Badge de fuente (SRF / MKP / FCS)
@@ -1072,9 +1088,11 @@ render_pipeline
                     elt.querySelector("#srf-count-map").textContent = countBy(d => d.mapState === 'onMap');
                     elt.querySelector("#srf-count-live").textContent = countBy(d => d.mapState === 'goLive');
                     const noGo = countBy(d => d.mapState === 'noGo');
+                    const noStatus = countBy(d => d.mapState === 'noStatus');
                     elt.querySelector("#srf-source-counts").textContent =
                         `SRF ${countBy(d => (d.source || 'SRF') === 'SRF')} · MKP ${countBy(d => d.source === 'MKP')} · FCS ${countBy(d => d.source === 'FCS')}` +
-                        (noGo > 0 ? ` · ${noGo} sin GO asociado` : '');
+                        (noGo > 0 ? ` · ${noGo} sin GO asociado` : '') +
+                        (noStatus > 0 ? ` · ${noStatus} sin estado del GO` : '');
 
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
                     if (combinedDevices.length === 0) {
@@ -1134,6 +1152,9 @@ render_pipeline
             ApiHelpers.getSessionPromise().then(async () => {
                 setupEventListeners();
                 applyMapStatusFilter();
+
+                // Estado de comunicación de los GO (el primer render lo espera)
+                status_start();
 
                 // SURFSIGHT PIPELINE
                 const srf_initPromise = (async () => {
