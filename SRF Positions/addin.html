@@ -40,7 +40,7 @@ render_pipeline
     <script>
         // Logs informativos y de diagnóstico: apagados. Poner en true para depurar.
         // Los errores reales (console.error) se loguean siempre.
-        const DEBUG = false;
+        const DEBUG = true;
         const dbg = (...args) => { if (DEBUG) console.log(...args); };
         // Mensajes de inicialización (una vez al cargar el add-in): siempre visibles
         const initLog = (...args) => console.log(...args);
