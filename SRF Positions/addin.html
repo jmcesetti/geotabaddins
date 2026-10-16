@@ -491,7 +491,7 @@ render_pipeline
                 {
                     typeName: "LogRecord",
                     search: {
-                        deviceSearch: { id: m.imei },
+                        deviceSearch: { id: m.deviceId },
                         fromDate: now,
                         toDate: now
                     },
@@ -532,7 +532,7 @@ render_pipeline
                         {
                             typeName: "DeviceStatusInfo",
                             search: {
-                                deviceSearch: { id: focusMappings[idx].imei }
+                                deviceSearch: { id: focusMappings[idx].deviceId }
                             },
                             resultsLimit: 1
                         }
@@ -581,8 +581,15 @@ render_pipeline
                 }
             }
 
-            // Filtrar mappings de cámaras Focus: partnerDeviceId empieza con "G"
-            const focusMappings = mkp_deviceMappings.filter(m => m.imei && m.imei.startsWith('G'));
+            // Filtrar mappings de cámaras Focus: partnerDeviceId empieza con "G".
+            // deviceId: id interno del Device de la cámara en Geotab (ej. "b4A3"), buscado por serialNumber.
+            // El partnerDeviceId es el serial; usarlo directo en deviceSearch no devuelve registros.
+            const snToId = {};
+            Object.values(GTB_DEVICES).forEach(d => { if (d.sn) snToId[d.sn] = d.id; });
+            const focusMappings = mkp_deviceMappings
+                .filter(m => m.imei && m.imei.startsWith('G'))
+                .map(m => Object.assign({}, m, { deviceId: snToId[m.imei] || m.imei }));
+            dbg(`[FCS] ${focusMappings.filter(m => snToId[m.imei]).length}/${focusMappings.length} cámaras Focus encontradas como Device en Geotab`);
 
             if (focusMappings.length === 0) {
                 dbg("[FCS] Sin cámaras Focus en los mappings");
@@ -604,6 +611,9 @@ render_pipeline
             fcs_allDevices = focusMappings.map((mapping, idx) => {
                 const records = Array.isArray(logResults[idx]) ? logResults[idx] : [];
                 const record = records[0] || null;
+                // Estado de la cámara: su propio DeviceStatusInfo (isDeviceCommunicating). Sin dato -> según haya registro.
+                const camStatus = GTB_STATUSINFO[mapping.deviceId];
+                const camStatusText = camStatus ? (camStatus.communicates === false ? 'offline' : 'online') : null;
 
                 // Nombre: usar el nombre del Device de Geotab cuyo sn == associatedDeviceSerialNumber
                 // Si no existe, usar el partnerDeviceId (id de cámara)
@@ -618,7 +628,7 @@ render_pipeline
                         lat: null,
                         lon: null,
                         speed: 0,
-                        status: 'offline',
+                        status: camStatusText || 'offline',
                         lastSeenOnline: null,
                         source: 'FCS'
                     };
@@ -631,7 +641,7 @@ render_pipeline
                     lat: record.latitude,
                     lon: record.longitude,
                     speed: Math.round(record.speed || 0),
-                    status: 'online',
+                    status: camStatusText || 'online',
                     lastSeenOnline: record.dateTime,
                     source: 'FCS'
                 };
