@@ -679,9 +679,13 @@ render_pipeline
                 // Construir mapa serialNumber->gtbId para asociar cada device con su GO
                 const serialToId = {};
                 const nameToId = {};
+                const plateToId = {};
+                // Patente normalizada: sin espacios ni guiones, en mayúsculas ("AI 367 ZW" == "AI367ZW")
+                const normPlate = p => String(p).replace(/[\s-]/g, '').toUpperCase();
                 Object.values(GTB_DEVICES).forEach(device => {
                     serialToId[device.sn] = device.id;
                     if (device.name) nameToId[device.name.trim().toLowerCase()] = device.id;
+                    if (device.licensePlate) plateToId[normPlate(device.licensePlate)] = device.id;
                 });
 
                 // Asignar gtbId a cada device usando el sn (serialNumber del GO asociado)
@@ -696,6 +700,11 @@ render_pipeline
                     if (!device.gtbId && device.name) {
                         device.gtbId = nameToId[device.name.trim().toLowerCase()] ?? null;
                         if (device.gtbId) device.gtbMatch = 'name';
+                    }
+                    // Respaldo 2: el nombre de la cámara es la patente del vehículo en Geotab
+                    if (!device.gtbId && device.name) {
+                        device.gtbId = plateToId[normPlate(device.name)] ?? null;
+                        if (device.gtbId) device.gtbMatch = 'plate';
                     }
                     const gtbDevice = device.gtbId ? GTB_DEVICES[device.gtbId] : null;
                     if (gtbDevice && gtbDevice.name) {
@@ -886,16 +895,19 @@ render_pipeline
                             badgeStyle = 'background:#fef08a; color:#854d0e;';
                         }
 
-                        // Posición para centrar: la de la cámara; si no tiene, la última del GO asociado
+                        // Posición para centrar:
+                        //   - GO comunicando: la del GO (es el ícono que muestra el mapa nativo)
+                        //   - si no: la de la cámara; si no tiene, la última del GO asociado
                         const goStatus = device.goStatus;
                         const camHasLocation = !!(device.lat && device.lon);
                         const goHasLocation = !!(goStatus && goStatus.lat && goStatus.lon);
-                        const target = camHasLocation ? { lat: device.lat, lon: device.lon }
-                                     : goHasLocation ? { lat: goStatus.lat, lon: goStatus.lon }
+                        const useGo = goHasLocation && (device.mapState === 'goLive' || !camHasLocation);
+                        const target = useGo ? { lat: goStatus.lat, lon: goStatus.lon }
+                                     : camHasLocation ? { lat: device.lat, lon: device.lon }
                                      : null;
 
-                        const locationStatus = camHasLocation ? '✓ Ubicación de la cámara'
-                                             : goHasLocation ? '✓ Ubicación del GO (cámara sin posición)'
+                        const locationStatus = useGo ? (device.mapState === 'goLive' ? '✓ Ubicación del GO' : '✓ Ubicación del GO (cámara sin posición)')
+                                             : camHasLocation ? '✓ Ubicación de la cámara'
                                              : '✗ Ubicación no disponible';
                         const locationStyle = target ? 'color:#065f46;' : 'color:#dc2626;';
 
