@@ -349,6 +349,14 @@ render_pipeline
                         imei: item.partnerDeviceId
                     }));
 
+                // Asociación cámara -> GO para TODOS los mappings (SRF la usa para encontrar su GO).
+                // Antes se armaba solo con las cámaras que respondían en OrganizationDevices/{imei},
+                // y si ninguna respondía, ninguna cámara SRF quedaba asociada a su GO.
+                mkp_snMap = {};
+                mkp_deviceMappings.forEach(m => { mkp_snMap[m.imei] = m.sn; });
+
+                console.log(`[MKP] DeviceMappings: ${items.length} recibidos, ${mkp_deviceMappings.length} con cámara+GO, ` +
+                    `${mkp_deviceMappings.filter(m => m.imei.startsWith('G')).length} Focus (G...)`);
                 return mkp_deviceMappings;
             } catch (err) {
                 console.error("[ERR] mkp_getDeviceMappings:", err);
@@ -420,10 +428,8 @@ render_pipeline
                 )
             );
             mkp_validDevices = results.filter(r => r.data).map(r => ({ sn: r.sn, imei: r.imei }));
-            mkp_snMap = {};
-            mkp_validDevices.forEach(device => {
-                mkp_snMap[device.imei] = device.sn;
-            });
+            // mkp_snMap ya se armó en mkp_getDeviceMappings con todos los mappings
+            console.log(`[MKP] OrganizationDevices: ${mkp_validDevices.length}/${results.length} cámaras respondieron`);
             mkp_allDevices = results.filter(r => r.data).map(r => ({
                 sn: r.sn,
                 imei: r.imei,
@@ -672,14 +678,25 @@ render_pipeline
 
                 // Construir mapa serialNumber->gtbId para asociar cada device con su GO
                 const serialToId = {};
+                const nameToId = {};
                 Object.values(GTB_DEVICES).forEach(device => {
                     serialToId[device.sn] = device.id;
+                    if (device.name) nameToId[device.name.trim().toLowerCase()] = device.id;
                 });
 
                 // Asignar gtbId a cada device usando el sn (serialNumber del GO asociado)
                 // y mostrar el nombre del Device de Geotab en lugar del SN / modelo
                 combinedDevices.forEach(device => {
+                    // SRF puede haber llegado antes que los DeviceMappings: completar el sn del GO acá
+                    if (!device.sn && device.imei && mkp_snMap[device.imei]) {
+                        device.sn = mkp_snMap[device.imei];
+                    }
                     device.gtbId = serialToId[device.sn] ?? null;
+                    // Respaldo: si no hay mapping, asociar por nombre (cámara nombrada igual que el vehículo)
+                    if (!device.gtbId && device.name) {
+                        device.gtbId = nameToId[device.name.trim().toLowerCase()] ?? null;
+                        if (device.gtbId) device.gtbMatch = 'name';
+                    }
                     const gtbDevice = device.gtbId ? GTB_DEVICES[device.gtbId] : null;
                     if (gtbDevice && gtbDevice.name) {
                         device.name = gtbDevice.name;
@@ -711,6 +728,19 @@ render_pipeline
                 allDevices = combinedDevices;
                 devices = combinedDevices.filter(device => device.mapState === 'onMap');
                 console.info("Devices printed (no comunicando):", devices.length);
+
+                // DIAGNÓSTICO: por qué se dibuja o no cada cámara
+                const stateCounts = {};
+                combinedDevices.forEach(d => { stateCounts[d.mapState] = (stateCounts[d.mapState] || 0) + 1; });
+                console.info("[RENDER] mapState:", JSON.stringify(stateCounts),
+                    "| GTB_DEVICES:", Object.keys(GTB_DEVICES).length,
+                    "| GTB_STATUSINFO:", Object.keys(GTB_STATUSINFO).length,
+                    "| onMap con ubicación de cámara:", devices.filter(d => d.lat && d.lon).length);
+                console.table(combinedDevices.map(d => ({
+                    name: d.name, source: d.source, imei: d.imei, sn: d.sn, gtbId: d.gtbId, match: d.gtbMatch || (d.gtbId ? 'sn' : '-'),
+                    communicates: d.goStatus ? d.goStatus.communicates : '(sin status)',
+                    mapState: d.mapState, lat: d.lat, lon: d.lon
+                })));
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
                 if (!Array.isArray(devices) || devices.length === 0) {
