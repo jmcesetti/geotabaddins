@@ -12,7 +12,7 @@
 
     Replica en el navegador la misma definición de tramos que feed_exception_events.py
     (GestorCiclos), pero sólo para saber en qué tramo está cada unidad AHORA:
-
+1
         ENTER ──────── STOP ──────── EXIT
           └ Espera <T> ──┴── <T> ──────┘      con STOP
           └──────────── <T> ───────────┘      sin STOP
@@ -91,6 +91,8 @@
         const RENDER_REFRESH_SEG    = 30;
         // Un evento de duración sigue abierto si su activeTo llega hasta el último dato del GO
         const TOLERANCIA_ABIERTO_SEG = 300;
+        // Un Carreteo de más de esto se muestra como "Fuera de circuito"
+        const CARRETEO_MAX_HORAS    = 24;
         // Restringir los afectados a estos grupos (ids). Vacío = todos los que tengan eventos SUPE.
         const GRUPOS_AFECTADOS      = [];
 
@@ -216,6 +218,45 @@
             } catch (err) {
                 console.error("[GTB] Error cargando conductores:", err);
             }
+        }
+
+        // Filtro de grupos del mapa (el selector de grupos de MyGeotab). Los grupos son
+        // jerárquicos: un device pertenece al filtro si alguno de sus grupos es un grupo
+        // elegido o descendiente de uno. null = sin filtro (toda la empresa).
+        let GTB_GRUPOS_HIJOS = {};
+        let FILTRO_GRUPOS = null;
+        let FILTRO_GRUPOS_N = 0;
+
+        async function gtb_loadGrupos() {
+            try {
+                const api = ApiHelpers.getApi();
+                const raw = await api.api.call("Get", { typeName: "Group", resultsLimit: 50000 });
+                GTB_GRUPOS_HIJOS = {};
+                for (const g of raw) {
+                    GTB_GRUPOS_HIJOS[g.id] = (g.children || []).map(c => refId(c));
+                }
+                initLog(`[GTB] ${raw.length} grupos`);
+            } catch (err) {
+                console.error("[GTB] Error cargando grupos:", err);
+            }
+        }
+
+        function filtro_aplicar(groups) {
+            const ids = (groups || []).map(g => refId(g)).filter(Boolean);
+            FILTRO_GRUPOS_N = ids.length;
+            if (ids.length === 0 || ids.includes("GroupCompanyId")) {
+                FILTRO_GRUPOS = null;
+                return;
+            }
+            const set = new Set();
+            const cola = [...ids];
+            while (cola.length) {
+                const id = cola.pop();
+                if (set.has(id)) continue;
+                set.add(id);
+                (GTB_GRUPOS_HIJOS[id] || []).forEach(h => cola.push(h));
+            }
+            FILTRO_GRUPOS = set;
         }
 
         function nombreConductor(driverId) {
@@ -577,7 +618,7 @@
                     const ultimaVisita = validas[validas.length - 1];
                     const zonaOrigen = ultimaVisita ? zonaDeEnter(ultimaVisita.enter) : null;
                     return Object.assign(base, {
-                        estado: "Carreteo",
+                        estado: (ahora - origen.af) > CARRETEO_MAX_HORAS * 3600e3 ? "Fuera de circuito" : "Carreteo",
                         desde: origen.af,
                         km: Math.round(km * 100) / 100,
                         zona: zonaOrigen ? `desde ${zonaOrigen.name}` : null
@@ -628,19 +669,27 @@
 
             const etiquetaEstado = v => v.estado + (v.inferido ? '?' : '');
 
-            // Devices afectados con su estado actual
-            function construirVehiculos() {
+            // Eventos agrupados por device, ordenados por activeFrom
+            function eventosPorDevice() {
                 const porDevice = {};
                 Object.values(EVENTOS).forEach(ev => {
                     (porDevice[ev.devId] = porDevice[ev.devId] || []).push(ev);
                 });
+                Object.values(porDevice).forEach(evs => evs.sort((a, b) => a.af - b.af));
+                return porDevice;
+            }
+
+            // Devices afectados (dentro del filtro de grupos del mapa) con su estado actual
+            function construirVehiculos() {
+                const porDevice = eventosPorDevice();
 
                 const out = [];
                 Object.keys(porDevice).forEach(devId => {
                     const device = GTB_DEVICES[devId];
                     if (!device) return;
                     if (GRUPOS_AFECTADOS.length && !device.groups.some(g => GRUPOS_AFECTADOS.includes(g))) return;
-                    const evs = porDevice[devId].sort((a, b) => a.af - b.af);
+                    if (FILTRO_GRUPOS && !device.groups.some(g => FILTRO_GRUPOS.has(g))) return;
+                    const evs = porDevice[devId];
                     const estado = calcularEstado(devId, evs);
                     const info = GTB_STATUSINFO[devId] || null;
                     out.push(Object.assign({
@@ -694,7 +743,13 @@
 
                 service.events.attach("click", data => {
                     if (!data || data.type !== "device" || !data.entity) return;
-                    if (vehiculoPorId(data.entity.id)) resaltarFila(data.entity.id);
+                    const v = vehiculoPorId(data.entity.id);
+                    if (!v) return;
+                    // Desde el mapa no se recentra: el usuario ya está mirando la unidad
+                    seleccionId = v.id;
+                    dibujarSeleccion();
+                    resaltarFila(v.id);
+                    elt.querySelectorAll('.mon-row').forEach(r => r.classList.toggle('mon-row-selected', r.dataset.id === seleccionId));
                 });
 
                 service.actionList.attachMenu("device", (menuName, data) => {
@@ -743,6 +798,27 @@
                 return f;
             }
 
+            // Selección: lo único que se dibuja en el mapa es un anillo alrededor de la unidad
+            // seleccionada (la API no permite resaltar el vehículo nativo). Se mueve con cada
+            // refresco y se quita volviendo a hacer clic en la fila o con Esc.
+            let seleccionId = null;
+            let seleccionAnillo = null;
+
+            function dibujarSeleccion() {
+                if (seleccionAnillo) { seleccionAnillo.remove(); seleccionAnillo = null; }
+                const v = seleccionId ? vehiculoPorId(seleccionId) : null;
+                if (!v || !v.lat || !v.lon) return;
+                seleccionAnillo = service.canvas.circle({ lat: v.lat, lng: v.lon }, 22, 10)
+                    .change({ "fill": "#3b82f6", "fill-opacity": 0.12, "stroke": "#1d4ed8", "stroke-width": 4 });
+            }
+
+            function seleccionar(v) {
+                seleccionId = seleccionId === v.id ? null : v.id;
+                elt.querySelectorAll('.mon-row').forEach(r => r.classList.toggle('mon-row-selected', r.dataset.id === seleccionId));
+                dibujarSeleccion();
+                if (seleccionId) centrar(v);
+            }
+
             async function centrar(v) {
                 try {
                     const pad = 0.01;
@@ -780,7 +856,8 @@
                     // Los que llevan más tiempo en el tramo, primero
                     grupo.sort((a, b) => (a.desde || 0) - (b.desde || 0)).forEach(v => {
                         const row = document.createElement('div');
-                        row.className = 'mon-row' + (v.lat && v.lon ? '' : ' mon-row-disabled');
+                        row.className = 'mon-row' + (v.lat && v.lon ? '' : ' mon-row-disabled')
+                            + (v.id === seleccionId ? ' mon-row-selected' : '');
                         row.dataset.id = v.id;
                         const dur = v.desde ? formatDuracion(Date.now() - v.desde) : '-';
 
@@ -807,10 +884,270 @@
                             <div class="mon-badges">${badges.join('')}</div>
                             <div class="mon-detail">${lineas.join('<br>')}</div>
                         `;
-                        if (v.lat && v.lon) row.addEventListener('click', () => centrar(v));
+                        if (v.lat && v.lon) row.addEventListener('click', () => seleccionar(v));
                         container.appendChild(row);
                     });
                 });
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            //  DASHBOARD — estadísticas del día (desde las 00:00 hora local)
+            // ─────────────────────────────────────────────────────────────────
+            // Se reconstruyen los tramos del día con la misma máquina de ciclos del estado
+            // actual, sobre los vehículos dentro del filtro de grupos del mapa.
+            let dashVisible = false;
+            let dashCalculando = false;
+            const OFFSET_LOCAL_MS = 3 * 3600e3;   // Argentina, UTC-3 (igual que TZ_LOCAL del feed)
+            const inicioDelDia = ms => Math.floor((ms - OFFSET_LOCAL_MS) / 86400e3) * 86400e3 + OFFSET_LOCAL_MS;
+            const horaLocal = ms => new Date(ms - OFFSET_LOCAL_MS).getUTCHours();
+            const promedio = arr => arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : null;
+
+            // Tipo de una visita de ENTER: el de su zona, o inferido si es mixta.
+            // undefined = falta resolver la zona (queda encolada).
+            function tipoDeVisita(enter, visitasPrevias) {
+                const zona = zonaDeEnter(enter);
+                if (zona === undefined) return undefined;
+                const tipo = zona ? zona.etiqueta : TIPO_DEFECTO;
+                if (tipo !== "Carga/Descarga") return { tipo, inferido: false, zona };
+                const t = inferirMixta(visitasPrevias);
+                if (t === undefined) return undefined;
+                return t ? { tipo: t, inferido: true, zona } : { tipo, inferido: false, zona };
+            }
+
+            function calcularDashboard() {
+                const ahora = Date.now();
+                const d0 = inicioDelDia(ahora);
+                const porDevice = eventosPorDevice();
+                const st = {
+                    d0,
+                    pendientes: false,
+                    operativos: { "Carga": [], "Descarga": [], "Carga/Descarga": [] },
+                    inferidos: 0,
+                    esperas: [],
+                    carreteos: [],            // { dur, km }
+                    demoras: [],              // { dur, devId, abierta }
+                    control: {},
+                    porZona: {},              // nombre -> { n, esperas: [], oper: [] }
+                    porHora: { "Carga": Array(24).fill(0), "Descarga": Array(24).fill(0), "Carga/Descarga": Array(24).fill(0) },
+                    activas: new Set()
+                };
+
+                vehiculos.forEach(veh => {
+                    const evs = porDevice[veh.id] || [];
+                    const { visitas } = reconstruirVisitas(evs);
+                    const exits = evs.filter(e => e.rol === "EXIT");
+                    let previaValida = null;
+
+                    visitas.forEach((v, i) => {
+                        if (!v.valida) return;
+                        // Carreteo: del EXIT de la visita válida anterior al ENTER de esta
+                        if (previaValida && v.enter.af >= d0) {
+                            const desde = previaValida.exit.af;
+                            const km = exits.filter(e => e.af >= desde && e.af < v.enter.af).reduce((s, e) => s + e.km, 0);
+                            st.carreteos.push({ dur: v.enter.af - desde, km });
+                            st.activas.add(veh.id);
+                        }
+                        previaValida = v;
+                        if (v.exit.af < d0) return;
+                        st.activas.add(veh.id);
+
+                        if (v.enter.rol === "CONTROL") {
+                            const etiqueta = REGLAS_GEOCERCA[v.enter.ruleId].etiqueta;
+                            st.control[etiqueta] = (st.control[etiqueta] || 0) + 1;
+                            return;
+                        }
+
+                        const t = tipoDeVisita(v.enter, visitas.slice(0, i));
+                        if (t === undefined) { st.pendientes = true; return; }
+                        if (!st.operativos[t.tipo]) return;
+
+                        const stops = evs.filter(e => e.rol === "STOP" && e.af > v.enter.af && e.af <= v.exit.af);
+                        const stop = stops[stops.length - 1] || null;
+                        const espera = stop ? stop.af - v.enter.af : 0;
+                        const oper = v.exit.af - (stop ? stop.af : v.enter.af);
+
+                        st.operativos[t.tipo].push(oper);
+                        if (t.inferido) st.inferidos++;
+                        st.porHora[t.tipo][horaLocal(v.exit.af)]++;
+                        if (stop) st.esperas.push(espera);
+
+                        const nombre = t.zona ? t.zona.name : "Sin geocerca resuelta";
+                        const z = st.porZona[nombre] = st.porZona[nombre] || { n: 0, esperas: [], oper: [] };
+                        z.n++;
+                        z.esperas.push(espera);
+                        z.oper.push(oper);
+                    });
+
+                    // Demoras que tocaron el día (las abiertas, hasta ahora)
+                    evs.filter(e => e.rol === "DELAY" && (e.at || ahora) >= d0).forEach(e => {
+                        const fin = e.at || ahora;
+                        st.demoras.push({ dur: fin - e.af, devId: veh.id, abierta: veh.estado === "Demora" || veh.estado === "StandBy" });
+                        st.activas.add(veh.id);
+                    });
+                });
+                return st;
+            }
+
+            // Barras horizontales: [{ label, valor, texto, title }]
+            function barrasH(filas, color) {
+                if (filas.length === 0) return '<div class="mon-empty">Sin datos en el día</div>';
+                const max = Math.max(...filas.map(f => f.valor)) || 1;
+                return filas.map(f => `
+                    <div class="mon-hbar" title="${esc(f.title || f.label)}">
+                        <span class="mon-hbar-label">${esc(f.label)}</span>
+                        <span class="mon-hbar-track"><span class="mon-hbar-fill" style="width:${Math.max(2, f.valor / max * 100)}%; background:${f.color || color};"></span></span>
+                        <span class="mon-hbar-val">${esc(f.texto)}</span>
+                    </div>`).join('');
+            }
+
+            // Operativos finalizados por hora, apilados por tipo (2px de separación entre tramos)
+            function barrasHora(porHora) {
+                const tipos = ["Carga", "Descarga", "Carga/Descarga"];
+                const horaActual = horaLocal(Date.now());
+                const totales = Array.from({ length: 24 }, (_, h) => tipos.reduce((s, t) => s + porHora[t][h], 0));
+                const max = Math.max(...totales) || 1;
+                const cols = totales.map((tot, h) => {
+                    const segs = tipos.filter(t => porHora[t][h] > 0).map(t =>
+                        `<span style="height:${porHora[t][h] / max * 100}%; background:${ESTADOS[t].color};"></span>`).join('');
+                    const detalle = tipos.map(t => `${t}: ${porHora[t][h]}`).join(' · ');
+                    return `<div class="mon-vcol${h > horaActual ? ' mon-vcol-futuro' : ''}" title="${String(h).padStart(2, '0')}:00 · ${tot} operativos (${detalle})">
+                                <div class="mon-vcol-bar">${segs}</div>
+                                <div class="mon-vcol-x">${h % 3 === 0 ? String(h).padStart(2, '0') : ''}</div>
+                            </div>`;
+                }).join('');
+                const leyenda = tipos.map(t => `<span class="mon-leg"><i style="background:${ESTADOS[t].color};"></i>${t}</span>`).join('');
+                return `<div class="mon-legend">${leyenda}</div><div class="mon-vchart">${cols}</div>`;
+            }
+
+            const tile = (valor, label, sub, tono) => `
+                <div class="mon-tile${tono ? ' mon-tile-' + tono : ''}">
+                    <div class="mon-tile-val">${valor}</div>
+                    <div class="mon-tile-label">${label}</div>
+                    ${sub ? `<div class="mon-tile-sub">${sub}</div>` : ''}
+                </div>`;
+
+            async function renderDashboard() {
+                const cont = elt.querySelector("#mon-dash");
+                if (dashCalculando) return;
+                dashCalculando = true;
+                try {
+                    let st = calcularDashboard();
+                    for (let pase = 0; pase < 5 && zona_pendientes.size > 0; pase++) {
+                        if (pase === 0 && !cont.innerHTML) cont.innerHTML = '<div class="mon-empty">Calculando estadísticas del día...</div>';
+                        await zona_resolverPendientes();
+                        st = calcularDashboard();
+                    }
+                    cont.innerHTML = htmlDashboard(st);
+                } catch (err) {
+                    console.error("[DASH]", err);
+                    cont.innerHTML = `<div class="mon-empty">Error al calcular: ${esc(err.message)}</div>`;
+                } finally {
+                    dashCalculando = false;
+                }
+            }
+
+            function htmlDashboard(st) {
+                const nC = st.operativos["Carga"].length;
+                const nD = st.operativos["Descarga"].length;
+                const nCD = st.operativos["Carga/Descarga"].length;
+                const kmTotal = st.carreteos.reduce((s, c) => s + c.km, 0);
+                const durDem = st.demoras.map(d => d.dur);
+                const standbyDia = st.demoras.filter(d => d.dur > DEMORA_STANDBY_SEG * 1000).length;
+                const fmt = ms => ms == null ? '-' : formatDuracion(ms);
+
+                // Estado actual de la flota
+                const porEstado = {};
+                vehiculos.forEach(v => { porEstado[v.estado] = (porEstado[v.estado] || 0) + 1; });
+                const filasEstado = Object.keys(ESTADOS).filter(e => porEstado[e]).map(e => ({
+                    label: e, valor: porEstado[e], texto: String(porEstado[e]), color: ESTADOS[e].color
+                }));
+
+                // Geocercas: mayor espera promedio, y las más visitadas
+                const zonas = Object.entries(st.porZona).map(([nombre, z]) => ({
+                    nombre, n: z.n, espera: promedio(z.esperas), oper: promedio(z.oper),
+                    conEspera: z.esperas.filter(x => x > 0).length
+                }));
+                const filasEspera = zonas.filter(z => z.espera > 0).sort((a, b) => b.espera - a.espera).slice(0, 8).map(z => ({
+                    label: z.nombre, valor: z.espera, texto: fmt(z.espera),
+                    title: `${z.nombre}: espera promedio ${fmt(z.espera)} · ${z.n} visitas (${z.conEspera} con espera) · operativo promedio ${fmt(z.oper)}`
+                }));
+                const filasVisitas = zonas.sort((a, b) => b.n - a.n).slice(0, 8).map(z => ({
+                    label: z.nombre, valor: z.n, texto: String(z.n),
+                    title: `${z.nombre}: ${z.n} operativos · operativo promedio ${fmt(z.oper)}`
+                }));
+
+                // Unidades con más tiempo en demora en el día
+                const demPorUnidad = {};
+                st.demoras.forEach(d => { demPorUnidad[d.devId] = (demPorUnidad[d.devId] || 0) + d.dur; });
+                const filasDemUnidad = Object.entries(demPorUnidad).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id, ms]) => {
+                    const v = vehiculoPorId(id);
+                    const nombre = v ? v.name : id;
+                    return { label: nombre, valor: ms, texto: fmt(ms), title: `${nombre}: ${fmt(ms)} en demora hoy` };
+                });
+
+                // Carreteos en curso hace más tiempo
+                const filasCarreteo = vehiculos.filter(v => v.estado === "Carreteo").sort((a, b) => a.desde - b.desde).slice(0, 5).map(v => ({
+                    label: v.name, valor: Date.now() - v.desde, texto: fmt(Date.now() - v.desde),
+                    title: `${v.name}: carreteando hace ${fmt(Date.now() - v.desde)}${v.km != null ? ' · ' + v.km + ' km' : ''}`
+                }));
+
+                const controles = ["Estacion de Servicio", "Relevo", "Gomeria", "Taller"];
+                const sinComunicar = vehiculos.filter(v => v.communicates === false).length;
+
+                return `
+                    <div class="mon-dash-head">Hoy desde las 00:00 · ${st.activas.size} unidades con actividad de ${vehiculos.length}
+                        ${st.pendientes ? '<br><span class="mon-b-warn mon-badge">Algunas geocercas siguen resolviéndose</span>' : ''}</div>
+
+                    <div class="mon-sec">Operativos finalizados</div>
+                    <div class="mon-tiles">
+                        ${tile(nC, 'Cargas', `prom. ${fmt(promedio(st.operativos["Carga"]))}`)}
+                        ${tile(nD, 'Descargas', `prom. ${fmt(promedio(st.operativos["Descarga"]))}`)}
+                        ${tile(nCD, 'Carga/Descarga', st.inferidos ? `${st.inferidos} mixtas inferidas como C o D` : 'mixtas sin inferir')}
+                    </div>
+                    <div class="mon-tiles">
+                        ${tile(st.carreteos.length, 'Carreteos', `prom. ${fmt(promedio(st.carreteos.map(c => c.dur)))}`)}
+                        ${tile(Math.round(kmTotal).toLocaleString('es-AR'), 'km carreteados', st.carreteos.length ? `prom. ${(kmTotal / st.carreteos.length).toFixed(1)} km` : '')}
+                        ${tile(fmt(promedio(st.esperas)), 'Espera promedio', `${st.esperas.length} con espera`)}
+                    </div>
+
+                    <div class="mon-sec">Demoras</div>
+                    <div class="mon-tiles">
+                        ${tile(st.demoras.length, 'Demoras', `${st.demoras.filter(d => d.abierta).length} en curso`, 'warn')}
+                        ${tile(fmt(promedio(durDem)), 'Demora promedio', `máx. ${fmt(durDem.length ? Math.max(...durDem) : null)}`, 'warn')}
+                        ${tile(standbyDia, 'StandBy', `> ${DEMORA_STANDBY_SEG / 3600} h`, 'crit')}
+                    </div>
+
+                    <div class="mon-sec">Estado actual de la flota</div>
+                    ${barrasH(filasEstado)}
+                    ${sinComunicar ? `<div class="mon-note">${sinComunicar} GO sin comunicar</div>` : ''}
+
+                    <div class="mon-sec">Operativos por hora</div>
+                    ${barrasHora(st.porHora)}
+
+                    <div class="mon-sec">Geocercas con mayor espera promedio</div>
+                    ${barrasH(filasEspera, '#d97706')}
+
+                    <div class="mon-sec">Geocercas más visitadas</div>
+                    ${barrasH(filasVisitas, '#2563eb')}
+
+                    <div class="mon-sec">Unidades con más tiempo en demora</div>
+                    ${barrasH(filasDemUnidad, '#f59e0b')}
+
+                    <div class="mon-sec">Carreteos en curso más largos</div>
+                    ${barrasH(filasCarreteo, ESTADOS["Carreteo"].color)}
+
+                    <div class="mon-sec">Visitas de control</div>
+                    <div class="mon-tiles mon-tiles-4">
+                        ${controles.map(c => tile(st.control[c] || 0, c === 'Estacion de Servicio' ? 'Estación' : c)).join('')}
+                    </div>
+                `;
+            }
+
+            function toggleDashboard() {
+                dashVisible = !dashVisible;
+                elt.querySelector("#mon-root").classList.toggle('mon-modo-dash', dashVisible);
+                elt.querySelector("#mon-dash-btn").textContent = dashVisible ? '☰ Lista' : '📊 Dashboard';
+                if (dashVisible) renderDashboard();
             }
 
             function renderContadores(lista) {
@@ -820,18 +1157,25 @@
                         : lista.filter(v => (ESTADOS[v.estado] || ESTADOS["Sin clasificar"]).cat === cat).length;
                     btn.querySelector('.mon-count').textContent = n;
                 });
-                const alertas = lista.filter(v => v.estado === 'StandBy').length;
-                elt.querySelector("#mon-alerts").textContent = alertas > 0 ? `⚠ ${alertas} en StandBy (> ${DEMORA_STANDBY_SEG / 3600} h detenido)` : '';
+                const standby = lista.filter(v => v.estado === 'StandBy').length;
+                const demoras = lista.filter(v => v.estado === 'Demora').length;
+                const alertas = [];
+                if (standby > 0) alertas.push(`${standby} en StandBy (> ${DEMORA_STANDBY_SEG / 3600} h detenido)`);
+                if (demoras > 0) alertas.push(`${demoras} en Demora`);
+                elt.querySelector("#mon-alerts").textContent = alertas.length ? `⚠ ${alertas.join(' · ')}` : '';
             }
 
             async function renderAll() {
                 const statusEl = elt.querySelector("#mon-status");
                 try {
                     await actualizarEstados();
+                    dibujarSeleccion();
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                    statusEl.textContent = `✓ ${vehiculos.length} vehículos afectados · actualizado ${timeStr}`;
+                    const filtro = FILTRO_GRUPOS ? ` (filtro: ${FILTRO_GRUPOS_N} grupo${FILTRO_GRUPOS_N === 1 ? '' : 's'})` : '';
+                    statusEl.textContent = `✓ ${vehiculos.length} vehículos afectados${filtro} · actualizado ${timeStr}`;
+                    if (dashVisible) renderDashboard();
                     statusEl.classList.remove("mon-error");
                 } catch (err) {
                     console.error("[RENDER]", err);
@@ -853,6 +1197,10 @@
                         renderLista(vehiculos);
                     });
                 });
+                document.addEventListener('keydown', e => {
+                    if (e.key === 'Escape' && seleccionId) seleccionar({ id: seleccionId });
+                });
+                elt.querySelector("#mon-dash-btn").addEventListener('click', toggleDashboard);
                 elt.querySelector("#mon-refresh").addEventListener('click', async () => {
                     await Promise.all([status_refreshData(), ev_refreshData()]);
                     renderAll();
@@ -883,6 +1231,7 @@
                 #mon-root .mon-row { padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:8px; cursor:pointer; transition:all 0.15s; }
                 #mon-root .mon-row:hover { background:#f0f4ff; border-color:#3b82f6; }
                 #mon-root .mon-row-disabled { opacity:0.6; cursor:not-allowed; }
+                #mon-root .mon-row-selected { border:2px solid #1d4ed8; background:#eff6ff; }
                 #mon-root .mon-row-focus { background:#fef3c7; border-color:#fbbf24; box-shadow:0 2px 8px rgba(251,191,36,0.25); }
                 #mon-root .mon-row-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
                 #mon-root .mon-name { font-weight:700; font-size:14px; color:#1f2937; }
@@ -894,6 +1243,42 @@
                 #mon-root .mon-b-off { background:#f3f4f6; color:#6b7280; }
                 #mon-root .mon-detail { font-size:12px; color:#6b7280; line-height:1.6; }
                 #mon-root .mon-detail strong { color:#374151; font-weight:600; }
+                #mon-root .mon-title-btns { display:flex; gap:6px; }
+                #mon-root .mon-btn-sec { background:#fff; color:#0076BE; }
+                #mon-root .mon-btn-sec:hover { background:#e8f2fa; }
+                /* Modo dashboard: se ocultan la lista, la búsqueda y los filtros */
+                #mon-root #mon-dash { display:none; flex:1; min-height:0; overflow-y:auto; padding:12px 14px; }
+                #mon-root.mon-modo-dash #mon-dash { display:block; }
+                #mon-root.mon-modo-dash #mon-list,
+                #mon-root.mon-modo-dash #mon-search,
+                #mon-root.mon-modo-dash .mon-filters { display:none; }
+                #mon-root .mon-dash-head { font-size:12px; color:#4b5563; margin-bottom:4px; }
+                #mon-root .mon-sec { font-size:11px; font-weight:700; color:#4b5563; text-transform:uppercase; letter-spacing:0.5px; margin:16px 0 8px; }
+                #mon-root .mon-tiles { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:8px; }
+                #mon-root .mon-tiles-4 { grid-template-columns:repeat(4, 1fr); }
+                #mon-root .mon-tile { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:8px 10px; }
+                #mon-root .mon-tile-val { font-size:20px; font-weight:700; color:#1f2937; line-height:1.2; }
+                #mon-root .mon-tile-label { font-size:11px; color:#4b5563; font-weight:600; }
+                #mon-root .mon-tile-sub { font-size:10px; color:#6b7280; margin-top:2px; }
+                #mon-root .mon-tile-warn { border-left:4px solid #f59e0b; }
+                #mon-root .mon-tile-crit { border-left:4px solid #9ca3af; }
+                #mon-root .mon-hbar { display:grid; grid-template-columns:130px 1fr 56px; align-items:center; gap:8px; font-size:11px; margin-bottom:5px; }
+                #mon-root .mon-hbar-label { color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+                #mon-root .mon-hbar-track { height:10px; background:#f3f4f6; border-radius:0 4px 4px 0; }
+                #mon-root .mon-hbar-fill { display:block; height:100%; border-radius:0 4px 4px 0; }
+                #mon-root .mon-hbar-val { text-align:right; color:#1f2937; font-weight:600; font-variant-numeric:tabular-nums; }
+                #mon-root .mon-legend { display:flex; gap:12px; font-size:11px; color:#4b5563; margin-bottom:6px; }
+                #mon-root .mon-leg i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+                #mon-root .mon-vchart { display:flex; align-items:flex-end; gap:2px; height:110px; border-bottom:1px solid #d1d5db; padding-bottom:0; }
+                #mon-root .mon-vcol { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; position:relative; cursor:default; }
+                #mon-root .mon-vcol:hover .mon-vcol-bar { opacity:0.75; }
+                #mon-root .mon-vcol-futuro { opacity:0.35; }
+                #mon-root .mon-vcol-bar { display:flex; flex-direction:column-reverse; gap:2px; height:100%; justify-content:flex-start; }
+                #mon-root .mon-vcol-bar span { display:block; width:100%; }
+                #mon-root .mon-vcol-bar span:last-child { border-radius:4px 4px 0 0; }
+                #mon-root .mon-vcol-x { position:absolute; bottom:-16px; left:0; font-size:9px; color:#6b7280; }
+                #mon-root .mon-vchart + * { margin-top:22px; }
+                #mon-root .mon-note { font-size:11px; color:#6b7280; margin-top:4px; }
                 #mon-root .mon-footer { padding:8px 12px; border-top:1px solid #e5e7eb; background:#f9fafb; }
                 #mon-root #mon-status { padding:8px 12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500; }
                 #mon-root #mon-status.mon-error { background:#fef2f2; color:#991b1b; border-color:#fecaca; }
@@ -908,7 +1293,10 @@
                     <div class="mon-header">
                       <div class="mon-title">
                         <h3>Monitor SUPE</h3>
-                        <button id="mon-refresh" class="mon-btn" title="Actualizar ahora">⟳ Actualizar</button>
+                        <div class="mon-title-btns">
+                          <button id="mon-dash-btn" class="mon-btn mon-btn-sec" title="Estadísticas del día">📊 Dashboard</button>
+                          <button id="mon-refresh" class="mon-btn" title="Actualizar ahora">⟳ Actualizar</button>
+                        </div>
                       </div>
                       <input type="text" id="mon-search" placeholder="Buscar por nombre, patente o geocerca...">
                       <div class="mon-filters">
@@ -917,6 +1305,7 @@
                       <div id="mon-alerts"></div>
                     </div>
                     <div id="mon-list"></div>
+                    <div id="mon-dash"></div>
                     <div class="mon-footer">
                       <div id="mon-status">Inicializando...</div>
                     </div>
@@ -948,7 +1337,19 @@
                 const statusEl = elt.querySelector("#mon-status");
                 try {
                     statusEl.textContent = "Cargando vehículos y geocercas...";
-                    await Promise.all([gtb_loadDevices(), gtb_loadDrivers(), gtb_loadZonas(), status_refreshData()]);
+                    await Promise.all([gtb_loadDevices(), gtb_loadDrivers(), gtb_loadZonas(), gtb_loadGrupos(), status_refreshData()]);
+
+                    // Filtro de grupos del mapa: el inicial y cada cambio
+                    try {
+                        filtro_aplicar(await service.page.getFilterState());
+                    } catch (err) {
+                        console.error("[FILTRO] No se pudo leer el filtro de grupos:", err);
+                    }
+                    service.page.attach("filterChange", data => {
+                        filtro_aplicar(data && data.groups);
+                        dbg("[FILTRO] Cambio de filtro:", FILTRO_GRUPOS_N, "grupos");
+                        renderAll();
+                    });
 
                     statusEl.textContent = `Cargando eventos SUPE (${LOOKBACK_HORAS} h)...`;
                     await ev_refreshData();
