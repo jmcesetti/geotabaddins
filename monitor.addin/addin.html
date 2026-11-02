@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Monitor SUPE Map Add-in</title>
+</head>
+<body>
+    <div id="addin-root"></div>
+
+    <!--
+    Monitor en tiempo real de los vehículos afectados a SUPE y su tramo actual.
+
+    Replica en el navegador la misma definición de tramos que feed_exception_events.py
+    (GestorCiclos), pero sólo para saber en qué tramo está cada unidad AHORA:
+
+        ENTER ──────── STOP ──────── EXIT
+          └ Espera <T> ──┴── <T> ──────┘      con STOP
+          └──────────── <T> ───────────┘      sin STOP
+
+        EXIT de una visita válida (>= 20 min) ── Carreteo ── ENTER siguiente
+        SUPE_DELAY durante el Carreteo -> Demora (StandBy si pasa las 2 h)
+        Reglas de control (GAS_STATION, SHIFT, TIRESHOP, WORKSHOP) -> visita sin Espera
+        Zona mixta -> se infiere por alternancia contra la última Carga/Descarga ("Carga?")
+
+    Pipelines:
+        api_helpers      getSession (todos esperan a este)
+        gtb_pipeline     Device + User (una vez), Zone SUPE (una vez)
+        status_pipeline  DeviceStatusInfo (30s): posición, velocidad, comunicación
+        ev_pipeline      ExceptionEvent de las reglas SUPE: carga completa de LOOKBACK_HORAS
+                         (cada 30 min) + incremental de los últimos 30 min (cada 60s)
+        zona_pipeline    zona de cada ENTER: LogRecord del ingreso + punto en polígono
+        render_pipeline  estado por device -> mapa + panel (cada 30s)
+
+    "Vehículos afectados" = devices con al menos un evento SUPE en la ventana de
+    LOOKBACK_HORAS (opcionalmente restringido a GRUPOS_AFECTADOS).
+    -->
+
+    <script>
+        // Logs informativos y de diagnóstico. Los errores reales (console.error) se loguean siempre.
+        const DEBUG = false;
+        const dbg = (...args) => { if (DEBUG) console.log(...args); };
+        const initLog = (...args) => console.log(...args);
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  CONFIGURACIÓN — mismos valores que feed_exception_events.py
+        // ─────────────────────────────────────────────────────────────────────
+        const REGLAS = {
+            ENTER:       "akAzrbsFNF02U11lI13LInA",
+            STOP:        "axDLlfKOkSk6TKBw-tMDy5A",
+            EXIT:        "amEGV5nbOuUyCbLWq0uEOrA",
+            DELAY:       "ax4iOp_UXHkiGZ30plOe9jQ",
+            GAS_STATION: "a8BBnzEgyCEC5Znb5qNA6aQ",
+            SHIFT:       "asE-Zs26ASkC3YOnuIQ37_w",
+            TIRESHOP:    "aDFTkL4ASD0qWv9zHn4knTg",
+            WORKSHOP:    "atqVyt5eP8EaoRADoKstgEw"
+        };
+
+        const ZONETYPES = {
+            "b232": "SUPE_CARGA",
+            "b233": "SUPE_DESCARGA",
+            "b55F": "SUPE_MIXTA",
+            "b56F": "SUPE_ESTACION_SERVICIO",
+            "b570": "SUPE_GOMERIA",
+            "b56E": "SUPE_RELEVOS",
+            "b571": "SUPE_TALLER"
+        };
+
+        // Reglas de control por geocerca: regla -> (zoneType, etiqueta del tramo)
+        const REGLAS_GEOCERCA = {
+            [REGLAS.GAS_STATION]: { zoneType: "SUPE_ESTACION_SERVICIO", etiqueta: "Estacion de Servicio" },
+            [REGLAS.SHIFT]:       { zoneType: "SUPE_RELEVOS",           etiqueta: "Relevo" },
+            [REGLAS.TIRESHOP]:    { zoneType: "SUPE_GOMERIA",           etiqueta: "Gomeria" },
+            [REGLAS.WORKSHOP]:    { zoneType: "SUPE_TALLER",            etiqueta: "Taller" }
+        };
+
+        const TIPO_DEFECTO               = "Carga/Descarga";
+        const DURACION_MINIMA_VISITA_SEG = 1200;        // por debajo es un paso por la geocerca
+        const DEMORA_STANDBY_SEG         = 2 * 3600;    // Demora de más de 2 h -> StandBy
+        const OFFSET_LOGRECORD_SEG       = 3;           // posición del ENTER: unos segundos después de cruzar
+        const VENTANA_LOGRECORD_SEG      = 60;
+        const MAX_PUNTOS_A_PROBAR        = 5;
+        const CHOFER_DESCONOCIDO         = "Conductor Desconocido";
+
+        // Propios del monitor
+        const LOOKBACK_HORAS        = 48;     // historia para reconstruir la última visita y la alternancia
+        const INCREMENTAL_MIN       = 30;     // ventana de cada refresco incremental de eventos
+        const EV_REFRESH_SEG        = 60;
+        const EV_RECARGA_TOTAL_MIN  = 30;     // recarga completa: descarta eventos invalidados
+        const STATUS_REFRESH_SEG    = 30;
+        const RENDER_REFRESH_SEG    = 30;
+        // Un evento de duración sigue abierto si su activeTo llega hasta el último dato del GO
+        const TOLERANCIA_ABIERTO_SEG = 300;
+        // Restringir los afectados a estos grupos (ids). Vacío = todos los que tengan eventos SUPE.
+        const GRUPOS_AFECTADOS      = [];
+
+        // Usuarios de MyGeotab habilitados a ver el monitor (en minúsculas)
+        const LISTA_BLANCA = [
+            "jm@cesetti.com.ar"
+        ];
+
+        // Estados que muestra el monitor: color en el mapa y categoría para los filtros
+        const ESTADOS = {
+            "Carga":                { color: "#2563eb", cat: "carga" },
+            "Descarga":             { color: "#7c3aed", cat: "descarga" },
+            "Carga/Descarga":       { color: "#0891b2", cat: "mixta" },
+            "Carreteo":             { color: "#16a34a", cat: "carreteo" },
+            "Demora":               { color: "#f59e0b", cat: "demora" },
+            "StandBy":              { color: "#dc2626", cat: "demora" },
+            "Estacion de Servicio": { color: "#0d9488", cat: "control" },
+            "Relevo":               { color: "#ea580c", cat: "control" },
+            "Gomeria":              { color: "#a16207", cat: "control" },
+            "Taller":               { color: "#475569", cat: "control" },
+            "Ingresando":           { color: "#94a3b8", cat: "otros" },
+            "Fuera de circuito":    { color: "#9ca3af", cat: "otros" },
+            "Sin clasificar":       { color: "#9ca3af", cat: "otros" }
+        };
+
+        const CATEGORIAS = [
+            { id: "all",      label: "Todos" },
+            { id: "carga",    label: "Carga" },
+            { id: "descarga", label: "Descarga" },
+            { id: "mixta",    label: "C/D" },
+            { id: "carreteo", label: "Carreteo" },
+            { id: "demora",   label: "Demora" },
+            { id: "control",  label: "Control" },
+            { id: "otros",    label: "Otros" }
+        ];
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  API HELPERS
+        // ─────────────────────────────────────────────────────────────────────
+        const ApiHelpers = (() => {
+            let _api = null;
+            let _session = null;
+            let _sessionPromise = null;
+
+            function init(api) {
+                _api = api;
+                _sessionPromise = _api.api.getSession().then(session => {
+                    _session = session;
+                    return session;
+                }).catch(err => {
+                    console.error("[Session] Error loading session:", err.message);
+                    throw err;
+                });
+            }
+
+            function getApi() { return _api; }
+            function getSession() { return _session; }
+            function getSessionPromise() { return _sessionPromise; }
+
+            return { init, getApi, getSession, getSessionPromise };
+        })();
+
+        // multiCall en lotes; si un lote falla entero, se reintenta de a una llamada
+        async function multiCallEnLotes(calls, tam = 100) {
+            const api = ApiHelpers.getApi();
+            const out = [];
+            for (let i = 0; i < calls.length; i += tam) {
+                const lote = calls.slice(i, i + tam);
+                try {
+                    const r = await api.api.multiCall(lote);
+                    out.push(...r);
+                } catch (err) {
+                    dbg("[API] multiCall falló, intentando de a uno:", err.message);
+                    for (const c of lote) {
+                        try {
+                            out.push(await api.api.call(c[0], c[1]));
+                        } catch (e) {
+                            console.error(`[API] ${c[1].typeName}:`, e.message);
+                            out.push([]);
+                        }
+                    }
+                }
+            }
+            return out;
+        }
+
+        // Geotab manda las referencias como {id} o como string ("UnknownDriverId")
+        const refId = ref => ref == null ? null : (typeof ref === 'object' ? ref.id : ref);
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  GTB PIPELINE — Device, User y Zone SUPE (una vez)
+        // ─────────────────────────────────────────────────────────────────────
+        let GTB_DEVICES = {};
+        let GTB_DRIVERS = {};
+        let ZONAS = [];
+
+        async function gtb_loadDevices() {
+            const api = ApiHelpers.getApi();
+            const raw = await api.api.call("Get", { typeName: "Device", resultsLimit: 50000 });
+            const now = Date.now();
+            GTB_DEVICES = {};
+            for (const d of raw) {
+                if (d.activeTo && Date.parse(d.activeTo) < now) continue;   // archivados
+                GTB_DEVICES[d.id] = {
+                    id: d.id,
+                    name: d.name,
+                    licensePlate: d.licensePlate || '',
+                    groups: (d.groups || []).map(g => refId(g))
+                };
+            }
+            initLog(`[GTB] ${Object.keys(GTB_DEVICES).length} devices activos`);
+        }
+
+        async function gtb_loadDrivers() {
+            try {
+                const api = ApiHelpers.getApi();
+                const raw = await api.api.call("Get", { typeName: "User", search: { isDriver: true }, resultsLimit: 50000 });
+                GTB_DRIVERS = {};
+                for (const u of raw) {
+                    GTB_DRIVERS[u.id] = [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name;
+                }
+                initLog(`[GTB] ${raw.length} conductores`);
+            } catch (err) {
+                console.error("[GTB] Error cargando conductores:", err);
+            }
+        }
+
+        function nombreConductor(driverId) {
+            if (!driverId || driverId === "UnknownDriverId" || driverId === "NoDriverId") return CHOFER_DESCONOCIDO;
+            return GTB_DRIVERS[driverId] || CHOFER_DESCONOCIDO;
+        }
+
+        // Misma traducción que etiqueta_de_zonetypes() del feed
+        function etiquetaDeZonetypes(tipos) {
+            if (tipos.has("SUPE_MIXTA")) return "Carga/Descarga";
+            const carga = tipos.has("SUPE_CARGA");
+            const descarga = tipos.has("SUPE_DESCARGA");
+            if (carga && descarga) return "Carga/Descarga";
+            if (carga) return "Carga";
+            if (descarga) return "Descarga";
+            for (const r of Object.values(REGLAS_GEOCERCA)) {
+                if (tipos.has(r.zoneType)) return r.etiqueta;
+            }
+            return TIPO_DEFECTO;
+        }
+
+        async function gtb_loadZonas() {
+            const api = ApiHelpers.getApi();
+            const raw = await api.api.call("Get", {
+                typeName: "Zone",
+                search: { zoneTypes: Object.keys(ZONETYPES).map(id => ({ id })) },
+                resultsLimit: 50000
+            });
+            ZONAS = [];
+            for (const z of raw) {
+                const tipos = new Set((z.zoneTypes || []).map(t => ZONETYPES[refId(t)]).filter(Boolean));
+                const pts = (z.points || []).map(p => [p.x, p.y]);   // [lon, lat]
+                if (tipos.size === 0 || pts.length < 3) continue;
+                const lons = pts.map(p => p[0]), lats = pts.map(p => p[1]);
+                const bbox = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+                ZONAS.push({
+                    id: z.id,
+                    name: z.name,
+                    tipos,
+                    etiqueta: etiquetaDeZonetypes(tipos),
+                    pts,
+                    bbox,
+                    area: (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                });
+            }
+            initLog(`[GTB] ${ZONAS.length} geocercas SUPE`);
+        }
+
+        function puntoEnPoligono(lon, lat, pts) {
+            let dentro = false;
+            for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+                const [xi, yi] = pts[i], [xj, yj] = pts[j];
+                if (((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)) dentro = !dentro;
+            }
+            return dentro;
+        }
+
+        // Geocerca SUPE que contiene el punto. Con zonas anidadas gana la más chica.
+        // `filtro` (opcional) limita a las zonas que tengan alguno de esos zoneTypes.
+        function zonaEnPunto(lat, lon, filtro) {
+            if (lat == null || lon == null) return null;
+            let mejor = null;
+            for (const z of ZONAS) {
+                if (filtro && ![...filtro].some(t => z.tipos.has(t))) continue;
+                const b = z.bbox;
+                if (lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) continue;
+                if (!puntoEnPoligono(lon, lat, z.pts)) continue;
+                if (!mejor || z.area < mejor.area) mejor = z;
+            }
+            return mejor;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  STATUS PIPELINE — DeviceStatusInfo (30s)
+        // ─────────────────────────────────────────────────────────────────────
+        let GTB_STATUSINFO = {};
+
+        async function status_refreshData() {
+            try {
+                const api = ApiHelpers.getApi();
+                const raw = await api.api.call("Get", { typeName: "DeviceStatusInfo" });
+                const out = {};
+                for (const s of raw) {
+                    const id = refId(s.device);
+                    if (!id) continue;
+                    out[id] = {
+                        lat: s.latitude,
+                        lon: s.longitude,
+                        speed: s.speed || 0,
+                        bearing: s.bearing,
+                        dateTime: s.dateTime,
+                        communicates: s.isDeviceCommunicating
+                    };
+                }
+                GTB_STATUSINFO = out;
+                dbg(`[StatusInfo] ${Object.keys(out).length} GO`);
+            } catch (err) {
+                console.error("[StatusInfo] Error:", err);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  EV PIPELINE — ExceptionEvent de las reglas SUPE
+        // ─────────────────────────────────────────────────────────────────────
+        // Rol de cada regla en la máquina de ciclos
+        const ROL_POR_REGLA = {
+            [REGLAS.ENTER]: "ENTER",
+            [REGLAS.STOP]:  "STOP",
+            [REGLAS.EXIT]:  "EXIT",
+            [REGLAS.DELAY]: "DELAY"
+        };
+        Object.keys(REGLAS_GEOCERCA).forEach(id => { ROL_POR_REGLA[id] = "CONTROL"; });
+
+        // id -> evento normalizado. Geotab reenvía el mismo id mientras el evento sigue
+        // abierto (activeTo y distance crecientes): se queda la versión más nueva.
+        let EVENTOS = {};
+        let ev_ultimaRecargaTotal = 0;
+
+        function ev_normalizar(ev) {
+            const ruleId = refId(ev.rule);
+            const estado = String(ev.state == null ? '' : ev.state).toLowerCase();
+            if (estado.startsWith('inval')) return null;
+            const af = Date.parse(ev.activeFrom);
+            if (isNaN(af)) return null;
+            const at = ev.activeTo ? Date.parse(ev.activeTo) : null;
+            return {
+                id: ev.id,
+                rol: ROL_POR_REGLA[ruleId],
+                ruleId,
+                devId: refId(ev.device),
+                driverId: refId(ev.driver),
+                af,
+                at: isNaN(at) ? null : at,
+                km: Number(ev.distance) || 0
+            };
+        }
+
+        async function ev_cargar(desdeMs, reemplazar) {
+            const fromDate = new Date(desdeMs).toISOString();
+            const calls = Object.keys(ROL_POR_REGLA).map(ruleId => ["Get", {
+                typeName: "ExceptionEvent",
+                search: { ruleSearch: { id: ruleId }, fromDate },
+                resultsLimit: 50000
+            }]);
+            const resultados = await multiCallEnLotes(calls);
+
+            const nuevos = reemplazar ? {} : EVENTOS;
+            let n = 0;
+            resultados.forEach(lista => {
+                (Array.isArray(lista) ? lista : []).forEach(raw => {
+                    const ev = ev_normalizar(raw);
+                    if (!ev || !ev.rol || !ev.devId) return;
+                    const previo = nuevos[ev.id];
+                    if (!previo || (ev.at || 0) >= (previo.at || 0)) nuevos[ev.id] = ev;
+                    n++;
+                });
+            });
+
+            // Fuera de la ventana: lo que terminó antes de LOOKBACK_HORAS
+            const limite = Date.now() - LOOKBACK_HORAS * 3600e3;
+            Object.keys(nuevos).forEach(id => {
+                const ev = nuevos[id];
+                if ((ev.at || ev.af) < limite) delete nuevos[id];
+            });
+
+            EVENTOS = nuevos;
+            return n;
+        }
+
+        async function ev_refreshData() {
+            try {
+                const ahora = Date.now();
+                if (ahora - ev_ultimaRecargaTotal >= EV_RECARGA_TOTAL_MIN * 60e3) {
+                    const n = await ev_cargar(ahora - LOOKBACK_HORAS * 3600e3, true);
+                    ev_ultimaRecargaTotal = ahora;
+                    initLog(`[EV] Carga completa (${LOOKBACK_HORAS} h): ${n} eventos SUPE`);
+                } else {
+                    const n = await ev_cargar(ahora - INCREMENTAL_MIN * 60e3, false);
+                    dbg(`[EV] Incremental: ${n} eventos`);
+                }
+            } catch (err) {
+                console.error("[EV] Error:", err);
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  ZONA PIPELINE — zona de cada ENTER (LogRecord del ingreso)
+        // ─────────────────────────────────────────────────────────────────────
+        // enterId -> zona | null (null = no cayó en ninguna geocerca SUPE)
+        const ZONA_POR_ENTER = {};
+        let zona_pendientes = new Map();   // enterId -> evento
+
+        // Devuelve la zona ya resuelta, o undefined y la encola para el próximo pase
+        function zonaDeEnter(ev) {
+            if (ev.id in ZONA_POR_ENTER) return ZONA_POR_ENTER[ev.id];
+            zona_pendientes.set(ev.id, ev);
+            return undefined;
+        }
+
+        async function zona_resolverPendientes() {
+            const lista = [...zona_pendientes.values()];
+            zona_pendientes = new Map();
+            if (lista.length === 0) return 0;
+
+            const calls = lista.map(ev => ["Get", {
+                typeName: "LogRecord",
+                search: {
+                    deviceSearch: { id: ev.devId },
+                    fromDate: new Date(ev.af - VENTANA_LOGRECORD_SEG * 1000).toISOString(),
+                    toDate: new Date(ev.af + VENTANA_LOGRECORD_SEG * 1000).toISOString()
+                },
+                resultsLimit: 100
+            }]);
+            const resultados = await multiCallEnLotes(calls);
+
+            lista.forEach((ev, i) => {
+                const filtro = ev.rol === "CONTROL"
+                    ? new Set([REGLAS_GEOCERCA[ev.ruleId].zoneType])
+                    : new Set(["SUPE_CARGA", "SUPE_DESCARGA", "SUPE_MIXTA"]);
+                // Primero los puntos más cercanos al ingreso + offset (el del cruce cae afuera)
+                const objetivo = ev.af + OFFSET_LOGRECORD_SEG * 1000;
+                const registros = (Array.isArray(resultados[i]) ? resultados[i] : [])
+                    .filter(r => r.latitude && r.longitude)
+                    .sort((a, b) => Math.abs(Date.parse(a.dateTime) - objetivo) - Math.abs(Date.parse(b.dateTime) - objetivo))
+                    .slice(0, MAX_PUNTOS_A_PROBAR);
+                let zona = null;
+                for (const r of registros) {
+                    zona = zonaEnPunto(r.latitude, r.longitude, filtro);
+                    if (zona) break;
+                }
+                ZONA_POR_ENTER[ev.id] = zona;
+            });
+            dbg(`[ZONA] ${lista.length} ingresos resueltos`);
+            return lista.length;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  MÁQUINA DE ESTADO — tramo actual de cada device
+        // ─────────────────────────────────────────────────────────────────────
+        const MIN_VISITA_MS = DURACION_MINIMA_VISITA_SEG * 1000;
+        const esIngreso = ev => ev.rol === "ENTER" || ev.rol === "CONTROL";
+
+        // Visitas (último ENTER antes de cada EXIT) y los ingresos que todavía no tienen EXIT
+        function reconstruirVisitas(evs) {
+            const visitas = [];
+            let pendientes = [];
+            for (const e of evs) {
+                if (esIngreso(e)) {
+                    pendientes.push(e);
+                } else if (e.rol === "EXIT") {
+                    if (pendientes.length) {
+                        const enter = pendientes[pendientes.length - 1];   // anidadas: gana el último
+                        visitas.push({ enter, exit: e, valida: (e.af - enter.af) >= MIN_VISITA_MS });
+                    }
+                    pendientes = [];
+                }
+            }
+            return { visitas, abiertas: pendientes };
+        }
+
+        const alternar = t => t === "Carga" ? "Descarga" : "Carga";
+
+        // Inferencia en zona mixta: alternancia contra la última Carga/Descarga real del device.
+        // Las mixtas intermedias ya fueron inferidas en su momento, así que cada una alterna de nuevo.
+        // Devuelve "Carga" | "Descarga" | null (sin memoria) | undefined (falta resolver zonas)
+        function inferirMixta(visitasPrevias) {
+            let mixtas = 0;
+            for (let i = visitasPrevias.length - 1; i >= 0; i--) {
+                const v = visitasPrevias[i];
+                if (!v.valida || v.enter.rol !== "ENTER") continue;
+                const zona = zonaDeEnter(v.enter);
+                if (zona === undefined) return undefined;
+                const tipo = zona ? zona.etiqueta : TIPO_DEFECTO;
+                if (tipo === "Carga" || tipo === "Descarga") {
+                    let r = tipo;
+                    for (let k = 0; k <= mixtas; k++) r = alternar(r);
+                    return r;
+                }
+                if (tipo === "Carga/Descarga") mixtas++;
+            }
+            return null;
+        }
+
+        function calcularEstado(devId, evs) {
+            const info = GTB_STATUSINFO[devId] || null;
+            const ahora = Date.now();
+            // "Ahora" de los eventos: el último dato del GO (si no comunica, sus excepciones quedan ahí)
+            const ultimoDato = info && info.dateTime ? Date.parse(info.dateTime) : ahora;
+            const abierto = ev => ev.at == null || ev.at >= ultimoDato - TOLERANCIA_ABIERTO_SEG * 1000;
+
+            const { visitas, abiertas } = reconstruirVisitas(evs);
+            const exits = evs.filter(e => e.rol === "EXIT");
+            const ultimoExit = exits[exits.length - 1] || null;
+            const enter = abiertas[abiertas.length - 1] || null;
+
+            const base = {
+                estado: "Sin clasificar", inferido: false, provisional: false,
+                desde: null, zona: null, espera: null, km: null,
+                driverId: (enter || ultimoExit || evs[evs.length - 1] || {}).driverId || null
+            };
+
+            // Demora: SUPE_DELAY abierto, posterior a la salida y a cualquier ingreso
+            const delays = evs.filter(e => e.rol === "DELAY" && abierto(e)
+                && (!ultimoExit || e.af >= ultimoExit.af) && (!enter || e.af > enter.af));
+            const demora = delays[delays.length - 1] || null;
+            if (demora) {
+                const seg = (ahora - demora.af) / 1000;
+                const lugar = info ? zonaEnPunto(info.lat, info.lon) : null;
+                return Object.assign(base, {
+                    estado: seg > DEMORA_STANDBY_SEG ? "StandBy" : "Demora",
+                    desde: demora.af,
+                    zona: lugar ? lugar.name : null,
+                    driverId: demora.driverId || base.driverId
+                });
+            }
+
+            // Visita en curso: el último ingreso sin EXIT
+            if (enter) {
+                const provisional = (ahora - enter.af) < MIN_VISITA_MS;
+                if (enter.rol === "CONTROL") {
+                    const zona = zonaDeEnter(enter);
+                    return Object.assign(base, {
+                        estado: REGLAS_GEOCERCA[enter.ruleId].etiqueta,
+                        desde: enter.af,
+                        zona: zona ? zona.name : (zona === undefined ? "resolviendo..." : null),
+                        provisional
+                    });
+                }
+
+                let zona = zonaDeEnter(enter);
+                // Mientras se resuelve el LogRecord del ingreso, la posición actual es buena aproximación
+                if (zona === undefined && info) zona = zonaEnPunto(info.lat, info.lon, new Set(["SUPE_CARGA", "SUPE_DESCARGA", "SUPE_MIXTA"])) || undefined;
+                let tipo = zona ? zona.etiqueta : TIPO_DEFECTO;
+                let inferido = false;
+                if (tipo === "Carga/Descarga") {
+                    const t = inferirMixta(visitas.filter(v => v.exit.af <= enter.af));
+                    if (t) { tipo = t; inferido = true; }
+                }
+
+                // Espera: del ENTER al último STOP; el operativo arranca en el STOP
+                const stops = evs.filter(e => e.rol === "STOP" && e.af > enter.af && e.af <= ahora);
+                const stop = stops[stops.length - 1] || null;
+                return Object.assign(base, {
+                    estado: tipo,
+                    inferido,
+                    provisional,
+                    desde: stop ? stop.af : enter.af,
+                    espera: stop ? { desde: enter.af, hasta: stop.af } : null,
+                    zona: zona ? zona.name : (zona === undefined ? "resolviendo..." : "Sin geocerca resuelta")
+                });
+            }
+
+            if (ultimoExit) {
+                if (abierto(ultimoExit)) {
+                    // Carreteo desde el EXIT de la última visita válida; los pasos (< 20 min) no lo cortan
+                    const validas = visitas.filter(v => v.valida);
+                    const origen = validas.length ? validas[validas.length - 1].exit : exits[0];
+                    const km = exits.filter(e => e.af >= origen.af).reduce((s, e) => s + e.km, 0);
+                    const ultimaVisita = validas[validas.length - 1];
+                    const zonaOrigen = ultimaVisita ? zonaDeEnter(ultimaVisita.enter) : null;
+                    return Object.assign(base, {
+                        estado: "Carreteo",
+                        desde: origen.af,
+                        km: Math.round(km * 100) / 100,
+                        zona: zonaOrigen ? `desde ${zonaOrigen.name}` : null
+                    });
+                }
+                // El EXIT cerró pero el ENTER todavía no llegó, o la unidad está en una zona no informada (Base)
+                const lugar = info ? zonaEnPunto(info.lat, info.lon) : null;
+                return Object.assign(base, {
+                    estado: lugar ? "Ingresando" : "Fuera de circuito",
+                    desde: ultimoExit.at,
+                    zona: lugar ? lugar.name : null
+                });
+            }
+
+            return base;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        //  ADD-IN
+        // ─────────────────────────────────────────────────────────────────────
+        geotab.addin.monitorSupe = function (elt, service) {
+            ApiHelpers.init(service);
+            let circles = [];
+            let vehiculos = [];
+            let currentFilter = 'all';
+            let currentSearch = '';
+            let render_refreshIntervalId = null;
+            let status_refreshIntervalId = null;
+            let ev_refreshIntervalId = null;
+
+            const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+            function formatHora(ms) {
+                if (!ms) return 'N/A';
+                return new Intl.DateTimeFormat('es-AR', {
+                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                    hour12: false, timeZone: 'America/Argentina/Buenos_Aires'
+                }).format(new Date(ms));
+            }
+
+            function formatDuracion(ms) {
+                if (ms == null || ms < 0) return '-';
+                const min = Math.floor(ms / 60000);
+                const h = Math.floor(min / 60);
+                if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+                return h > 0 ? `${h}h ${String(min % 60).padStart(2, '0')}m` : `${min}m`;
+            }
+
+            const etiquetaEstado = v => v.estado + (v.inferido ? '?' : '');
+
+            // Devices afectados con su estado actual
+            function construirVehiculos() {
+                const porDevice = {};
+                Object.values(EVENTOS).forEach(ev => {
+                    (porDevice[ev.devId] = porDevice[ev.devId] || []).push(ev);
+                });
+
+                const out = [];
+                Object.keys(porDevice).forEach(devId => {
+                    const device = GTB_DEVICES[devId];
+                    if (!device) return;
+                    if (GRUPOS_AFECTADOS.length && !device.groups.some(g => GRUPOS_AFECTADOS.includes(g))) return;
+                    const evs = porDevice[devId].sort((a, b) => a.af - b.af);
+                    const estado = calcularEstado(devId, evs);
+                    const info = GTB_STATUSINFO[devId] || null;
+                    out.push(Object.assign({
+                        id: devId,
+                        name: device.name,
+                        licensePlate: device.licensePlate,
+                        lat: info ? info.lat : null,
+                        lon: info ? info.lon : null,
+                        speed: info ? Math.round(info.speed) : 0,
+                        communicates: info ? info.communicates : null,
+                        lastData: info && info.dateTime ? Date.parse(info.dateTime) : null
+                    }, estado));
+                });
+                return out.sort((a, b) => a.name.localeCompare(b.name));
+            }
+
+            // Calcula estados; si quedaron ingresos sin zona, los resuelve y recalcula
+            async function actualizarEstados() {
+                vehiculos = construirVehiculos();
+                for (let pase = 0; pase < 5 && zona_pendientes.size > 0; pase++) {
+                    await zona_resolverPendientes();
+                    vehiculos = construirVehiculos();
+                }
+            }
+
+            function tooltipDe(v) {
+                const sec = [
+                    `${etiquetaEstado(v)}${v.provisional ? ' (validando)' : ''} · ${formatDuracion(Date.now() - v.desde)}`
+                ];
+                if (v.zona) sec.push(v.zona);
+                if (v.km != null) sec.push(`${v.km} km`);
+                sec.push(nombreConductor(v.driverId));
+                sec.push(`${v.speed} km/h · ${formatHora(v.lastData)}`);
+                return { main: `${v.name}${v.licensePlate ? ' · ' + v.licensePlate : ''}`, secondary: sec };
+            }
+
+            function drawVehiculos(lista) {
+                clearVehiculos();
+                lista.forEach(v => {
+                    if (!v.lat || !v.lon) return;
+                    const cfg = ESTADOS[v.estado] || ESTADOS["Sin clasificar"];
+                    // Anillo alrededor del ícono nativo del vehículo, del color del tramo
+                    const circle = service.canvas.circle({ lat: v.lat, lng: v.lon }, 14, 10)
+                        .change({
+                            "fill": cfg.color,
+                            "fill-opacity": v.provisional ? 0.15 : 0.35,
+                            "stroke": cfg.color,
+                            "stroke-width": v.communicates === false ? 2 : 4
+                        })
+                        .attach("over", coords => service.tooltip.showAt(coords, tooltipDe(v), 1))
+                        .attach("out", () => service.tooltip.hide());
+                    circles.push(circle);
+                });
+            }
+
+            function clearVehiculos() {
+                circles.forEach(c => c.remove());
+                circles = [];
+            }
+
+            function filtrar(lista) {
+                let f = lista;
+                if (currentFilter !== 'all') f = f.filter(v => (ESTADOS[v.estado] || ESTADOS["Sin clasificar"]).cat === currentFilter);
+                const s = currentSearch.trim().toLowerCase();
+                if (s) f = f.filter(v => v.name.toLowerCase().includes(s) || v.licensePlate.toLowerCase().includes(s)
+                    || (v.zona || '').toLowerCase().includes(s));
+                return f;
+            }
+
+            async function centrar(v) {
+                try {
+                    const pad = 0.01;
+                    await service.map.setBounds({
+                        sw: { lat: v.lat - pad, lng: v.lon - pad },
+                        ne: { lat: v.lat + pad, lng: v.lon + pad }
+                    });
+                } catch (e) {
+                    console.error("[MAP] Error al centrar:", e);
+                }
+            }
+
+            function renderLista(lista) {
+                const container = elt.querySelector("#mon-list");
+                const filtrados = filtrar(lista);
+                container.innerHTML = '';
+
+                if (filtrados.length === 0) {
+                    container.innerHTML = '<div class="mon-empty">No hay vehículos</div>';
+                    return;
+                }
+
+                // Agrupado por estado, en el orden de ESTADOS
+                Object.keys(ESTADOS).forEach(estado => {
+                    const grupo = filtrados.filter(v => v.estado === estado);
+                    if (grupo.length === 0) return;
+                    const cfg = ESTADOS[estado];
+
+                    const title = document.createElement('div');
+                    title.className = 'mon-group';
+                    title.style.borderLeftColor = cfg.color;
+                    title.textContent = `${estado} (${grupo.length})`;
+                    container.appendChild(title);
+
+                    // Los que llevan más tiempo en el tramo, primero
+                    grupo.sort((a, b) => (a.desde || 0) - (b.desde || 0)).forEach(v => {
+                        const row = document.createElement('div');
+                        row.className = 'mon-row' + (v.lat && v.lon ? '' : ' mon-row-disabled');
+                        const dur = v.desde ? formatDuracion(Date.now() - v.desde) : '-';
+
+                        const badges = [
+                            `<span class="mon-badge" style="background:${cfg.color}1f; color:${cfg.color};">${esc(etiquetaEstado(v))}</span>`
+                        ];
+                        if (v.provisional) badges.push('<span class="mon-badge mon-b-warn" title="Menos de 20 min adentro: puede ser un paso por la geocerca">Validando</span>');
+                        if (v.inferido) badges.push('<span class="mon-badge mon-b-info" title="Zona mixta: tipo inferido por alternancia">Inferido</span>');
+                        if (v.communicates === false) badges.push('<span class="mon-badge mon-b-off">GO sin comunicar</span>');
+
+                        const lineas = [];
+                        if (v.zona) lineas.push(`<strong>Geocerca:</strong> ${esc(v.zona)}`);
+                        if (v.espera) lineas.push(`<strong>Espera ${esc(etiquetaEstado(v))}:</strong> ${formatDuracion(v.espera.hasta - v.espera.desde)} (${formatHora(v.espera.desde)})`);
+                        lineas.push(`<strong>En el tramo:</strong> ${dur} · desde ${formatHora(v.desde)}`);
+                        if (v.km != null) lineas.push(`<strong>Recorrido:</strong> ${v.km} km`);
+                        lineas.push(`<strong>Conductor:</strong> ${esc(nombreConductor(v.driverId))}`);
+                        lineas.push(`<strong>Velocidad:</strong> ${v.speed} km/h · <strong>Último dato:</strong> ${formatHora(v.lastData)}`);
+
+                        row.innerHTML = `
+                            <div class="mon-row-head">
+                                <span class="mon-name">${esc(v.name)}</span>
+                                <span class="mon-plate">${esc(v.licensePlate)}</span>
+                            </div>
+                            <div class="mon-badges">${badges.join('')}</div>
+                            <div class="mon-detail">${lineas.join('<br>')}</div>
+                        `;
+                        if (v.lat && v.lon) row.addEventListener('click', () => centrar(v));
+                        container.appendChild(row);
+                    });
+                });
+            }
+
+            function renderContadores(lista) {
+                elt.querySelectorAll("[data-filter]").forEach(btn => {
+                    const cat = btn.dataset.filter;
+                    const n = cat === 'all' ? lista.length
+                        : lista.filter(v => (ESTADOS[v.estado] || ESTADOS["Sin clasificar"]).cat === cat).length;
+                    btn.querySelector('.mon-count').textContent = n;
+                });
+                const alertas = lista.filter(v => v.estado === 'StandBy').length;
+                elt.querySelector("#mon-alerts").textContent = alertas > 0 ? `⚠ ${alertas} en StandBy (> ${DEMORA_STANDBY_SEG / 3600} h detenido)` : '';
+            }
+
+            async function renderAll() {
+                const statusEl = elt.querySelector("#mon-status");
+                try {
+                    await actualizarEstados();
+                    drawVehiculos(vehiculos);
+                    renderLista(vehiculos);
+                    renderContadores(vehiculos);
+                    const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    statusEl.textContent = `✓ ${vehiculos.length} vehículos afectados · actualizado ${timeStr}`;
+                    statusEl.classList.remove("mon-error");
+                } catch (err) {
+                    console.error("[RENDER]", err);
+                    statusEl.textContent = `✗ ${err.message}`;
+                    statusEl.classList.add("mon-error");
+                }
+            }
+
+            function setupEventListeners() {
+                elt.querySelector("#mon-search").addEventListener('input', e => {
+                    currentSearch = e.target.value;
+                    renderLista(vehiculos);
+                });
+                elt.querySelectorAll("[data-filter]").forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        elt.querySelectorAll("[data-filter]").forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        currentFilter = btn.dataset.filter;
+                        renderLista(vehiculos);
+                    });
+                });
+                elt.querySelector("#mon-refresh").addEventListener('click', async () => {
+                    await Promise.all([status_refreshData(), ev_refreshData()]);
+                    renderAll();
+                });
+            }
+
+            // Geotab descarta el <head>: los estilos se inyectan acá, acotados a #mon-root
+            const style = document.createElement('style');
+            style.textContent = `
+                #mon-root { display:flex; height:100%; width:100%; font-family:'Segoe UI',Roboto,Arial,sans-serif; color:#333; background:#fff; }
+                #mon-root .mon-panel { width:430px; height:100%; max-height:100vh; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; box-shadow:2px 0 8px rgba(0,0,0,0.08); }
+                #mon-root .mon-header { padding:16px 20px; border-bottom:1px solid #e5e7eb; background:#f9fafb; }
+                #mon-root .mon-title { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+                #mon-root .mon-title h3 { font-size:18px; font-weight:700; color:#1f2937; margin:0; letter-spacing:-0.5px; }
+                #mon-root .mon-btn { padding:4px 10px; border:1px solid #0076BE; background:#0076BE; color:#fff; border-radius:6px; font-size:12px; cursor:pointer; }
+                #mon-root .mon-btn:hover { background:#005A9E; }
+                #mon-root #mon-search { width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:10px; box-sizing:border-box; }
+                #mon-root #mon-search:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
+                #mon-root .mon-filters { display:flex; gap:6px; flex-wrap:wrap; }
+                #mon-root .mon-filters button { flex:1 0 auto; padding:6px 8px; border:1px solid #d1d5db; background:#fff; color:#4b5563; border-radius:6px; font-size:11px; font-weight:500; cursor:pointer; }
+                #mon-root .mon-filters button.active { background:#3b82f6; color:#fff; border-color:#3b82f6; }
+                #mon-root .mon-count { font-weight:700; margin-left:4px; }
+                #mon-root #mon-alerts { color:#b91c1c; font-size:12px; font-weight:600; margin-top:8px; }
+                #mon-root #mon-alerts:empty { display:none; }
+                #mon-root #mon-list { flex:1; min-height:0; overflow-y:auto; padding:12px; }
+                #mon-root .mon-empty { padding:16px; text-align:center; color:#999; font-size:12px; }
+                #mon-root .mon-group { font-weight:700; font-size:11px; color:#4b5563; text-transform:uppercase; padding:8px 12px; background:#f3f4f6; border-left:4px solid #3b82f6; margin:4px 0 8px; letter-spacing:0.5px; }
+                #mon-root .mon-row { padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:8px; cursor:pointer; transition:all 0.15s; }
+                #mon-root .mon-row:hover { background:#f0f4ff; border-color:#3b82f6; }
+                #mon-root .mon-row-disabled { opacity:0.6; cursor:not-allowed; }
+                #mon-root .mon-row-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+                #mon-root .mon-name { font-weight:700; font-size:14px; color:#1f2937; }
+                #mon-root .mon-plate { font-size:11px; color:#6b7280; font-family:Consolas,monospace; }
+                #mon-root .mon-badges { margin-bottom:6px; }
+                #mon-root .mon-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:4px; }
+                #mon-root .mon-b-warn { background:#fef3c7; color:#92400e; }
+                #mon-root .mon-b-info { background:#e0f2fe; color:#075985; }
+                #mon-root .mon-b-off { background:#f3f4f6; color:#6b7280; }
+                #mon-root .mon-detail { font-size:12px; color:#6b7280; line-height:1.6; }
+                #mon-root .mon-detail strong { color:#374151; font-weight:600; }
+                #mon-root .mon-footer { padding:8px 12px; border-top:1px solid #e5e7eb; background:#f9fafb; }
+                #mon-root #mon-status { padding:8px 12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500; }
+                #mon-root #mon-status.mon-error { background:#fef2f2; color:#991b1b; border-color:#fecaca; }
+            `;
+
+            elt.style.width = '100%';
+            elt.style.height = '100%';
+            elt.style.overflow = 'hidden';
+            elt.innerHTML = `
+                <div id="mon-root">
+                  <div class="mon-panel">
+                    <div class="mon-header">
+                      <div class="mon-title">
+                        <h3>Monitor SUPE</h3>
+                        <button id="mon-refresh" class="mon-btn" title="Actualizar ahora">⟳ Actualizar</button>
+                      </div>
+                      <input type="text" id="mon-search" placeholder="Buscar por nombre, patente o geocerca...">
+                      <div class="mon-filters">
+                        ${CATEGORIAS.map(c => `<button data-filter="${c.id}" class="${c.id === 'all' ? 'active' : ''}">${c.label}<span class="mon-count">0</span></button>`).join('')}
+                      </div>
+                      <div id="mon-alerts"></div>
+                    </div>
+                    <div id="mon-list"></div>
+                    <div class="mon-footer">
+                      <div id="mon-status">Inicializando...</div>
+                    </div>
+                  </div>
+                  <div style="flex:1;"></div>
+                </div>
+            `;
+            elt.prepend(style);
+
+            ApiHelpers.getSessionPromise().then(async session => {
+                // Sin acceso: no se arranca ningún pipeline ni se dibuja nada en el mapa
+                const usuario = (session.userName || "").toLowerCase().trim();
+                if (!LISTA_BLANCA.includes(usuario)) {
+                    elt.querySelector("#mon-root").innerHTML = `
+                        <div style="width:430px; display:flex; align-items:center; justify-content:center; text-align:center; border-right:1px solid #e5e7eb; color:#323130;">
+                          <div>
+                            <h2 style="margin-bottom:10px; font-weight:600;">Monitor SUPE</h2>
+                            <div style="color:#605e5c;">No tiene acceso para visualizar este elemento</div>
+                          </div>
+                        </div>
+                        <div style="flex:1;"></div>
+                    `;
+                    initLog(`[APP] Usuario sin acceso: ${usuario}`);
+                    return;
+                }
+
+                setupEventListeners();
+                const statusEl = elt.querySelector("#mon-status");
+                try {
+                    statusEl.textContent = "Cargando vehículos y geocercas...";
+                    await Promise.all([gtb_loadDevices(), gtb_loadDrivers(), gtb_loadZonas(), status_refreshData()]);
+
+                    statusEl.textContent = `Cargando eventos SUPE (${LOOKBACK_HORAS} h)...`;
+                    await ev_refreshData();
+
+                    statusEl.textContent = "Resolviendo geocercas de ingreso...";
+                    await renderAll();
+                    initLog(`[APP] Monitor iniciado: ${vehiculos.length} vehículos afectados`);
+
+                    status_refreshIntervalId = setInterval(status_refreshData, STATUS_REFRESH_SEG * 1000);
+                    ev_refreshIntervalId = setInterval(ev_refreshData, EV_REFRESH_SEG * 1000);
+                    render_refreshIntervalId = setInterval(renderAll, RENDER_REFRESH_SEG * 1000);
+                } catch (err) {
+                    console.error("[APP] Initialization failed:", err);
+                    statusEl.textContent = `✗ Error al inicializar: ${err.message}`;
+                    statusEl.classList.add("mon-error");
+                }
+            }).catch(err => {
+                console.error("[Session]", err.message);
+                elt.querySelector("#mon-status").textContent = "✗ Error loading session";
+            });
+        };
+
+        initLog("[APP] Script loaded");
+    </script>
+</body>
+</html>

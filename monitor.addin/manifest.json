@@ -1,0 +1,14 @@
+{
+    "name": "Monitor SUPE Map Add-in",
+    "supportEmail": "jm@cesetti.com.ar",
+    "version": "1.0.0",
+    "items": [
+        {
+        "page": "map",
+        "title": "Monitor SUPE Map Add-in",
+        "mapScript": {
+            "url": "https://raw.githubusercontent.com/jmcesetti/geotabaddins/refs/heads/main/monitor.addin/addin.html"
+        }
+        }],
+    "isSigned": false
+}
