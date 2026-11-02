@@ -778,10 +778,11 @@
                     if (!data || data.type !== "device" || !data.entity) return;
                     const v = vehiculoPorId(data.entity.id);
                     if (!v) return;
-                    // Desde el mapa no se recentra: el usuario ya está mirando la unidad
-                    seleccionId = v.id;
+                    // Desde el mapa no se recentra: el usuario ya está mirando la unidad.
+                    // Click sobre la unidad ya seleccionada: se deselecciona.
+                    seleccionId = seleccionId === v.id ? null : v.id;
                     dibujarSeleccion();
-                    resaltarFila(v.id);
+                    if (seleccionId) resaltarFila(v.id);
                     elt.querySelectorAll('.mon-row').forEach(r => r.classList.toggle('mon-row-selected', r.dataset.id === seleccionId));
                 });
 
@@ -848,7 +849,7 @@
                 const v = seleccionId ? vehiculoPorId(seleccionId) : null;
                 if (!v || !v.lat || !v.lon) return;
                 seleccionAnillo = service.canvas.circle({ lat: v.lat, lng: v.lon }, 22, 10)
-                    .change({ "fill": "#3b82f6", "fill-opacity": 0.12, "stroke": "#1d4ed8", "stroke-width": 4 });
+                    .change({ "fill": "#ff1fa8", "fill-opacity": 0.18, "stroke": "#ff1fa8", "stroke-width": 4 });
             }
 
             function seleccionar(v) {
@@ -1343,7 +1344,7 @@
                 #mon-root .mon-row { padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:8px; cursor:pointer; transition:all 0.15s; }
                 #mon-root .mon-row:hover { background:#f0f4ff; border-color:#3b82f6; }
                 #mon-root .mon-row-disabled { opacity:0.6; cursor:not-allowed; }
-                #mon-root .mon-row-selected { border:2px solid #1d4ed8; background:#eff6ff; }
+                #mon-root .mon-row-selected { border:2px solid #ff1fa8; background:#fff0f8; }
                 #mon-root .mon-row-focus { background:#fef3c7; border-color:#fbbf24; box-shadow:0 2px 8px rgba(251,191,36,0.25); }
                 #mon-root .mon-row-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
                 #mon-root .mon-name { font-weight:700; font-size:14px; color:#1f2937; }
