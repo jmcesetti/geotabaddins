@@ -29,7 +29,8 @@
         ev_pipeline      ExceptionEvent de las reglas SUPE: carga completa de LOOKBACK_HORAS
                          (cada 30 min) + incremental de los últimos 30 min (cada 60s)
         zona_pipeline    zona de cada ENTER: LogRecord del ingreso + punto en polígono
-        render_pipeline  estado por device -> mapa + panel (cada 30s)
+        render_pipeline  estado por device -> panel (cada 30s); en el mapa no se dibuja nada:
+                         el tramo se suma al tooltip y al menú de los vehículos nativos
 
     "Vehículos afectados" = devices con al menos un evento SUPE en la ventana de
     LOOKBACK_HORAS (opcionalmente restringido a GRUPOS_AFECTADOS).
@@ -599,7 +600,6 @@
         // ─────────────────────────────────────────────────────────────────────
         geotab.addin.monitorSupe = function (elt, service) {
             ApiHelpers.init(service);
-            let circles = [];
             let vehiculos = [];
             let currentFilter = 'all';
             let currentSearch = '';
@@ -666,39 +666,72 @@
                 }
             }
 
+            // Parte que se suma al tooltip nativo (el nombre del vehículo ya lo muestra Geotab)
             function tooltipDe(v) {
-                const sec = [
-                    `${etiquetaEstado(v)}${v.provisional ? ' (validando)' : ''} · ${formatDuracion(Date.now() - v.desde)}`
-                ];
+                const sec = [`En el tramo: ${formatDuracion(Date.now() - v.desde)} · desde ${formatHora(v.desde)}`];
                 if (v.zona) sec.push(v.zona);
+                if (v.espera) sec.push(`Espera: ${formatDuracion(v.espera.hasta - v.espera.desde)}`);
                 if (v.km != null) sec.push(`${v.km} km`);
-                sec.push(nombreConductor(v.driverId));
-                sec.push(`${v.speed} km/h · ${formatHora(v.lastData)}`);
-                return { main: `${v.name}${v.licensePlate ? ' · ' + v.licensePlate : ''}`, secondary: sec };
+                return {
+                    main: `SUPE: ${etiquetaEstado(v)}${v.provisional ? ' (validando)' : ''}`,
+                    secondary: sec
+                };
             }
 
-            function drawVehiculos(lista) {
-                clearVehiculos();
-                lista.forEach(v => {
-                    if (!v.lat || !v.lon) return;
-                    const cfg = ESTADOS[v.estado] || ESTADOS["Sin clasificar"];
-                    // Anillo alrededor del ícono nativo del vehículo, del color del tramo
-                    const circle = service.canvas.circle({ lat: v.lat, lng: v.lon }, 14, 10)
-                        .change({
-                            "fill": cfg.color,
-                            "fill-opacity": v.provisional ? 0.15 : 0.35,
-                            "stroke": cfg.color,
-                            "stroke-width": v.communicates === false ? 2 : 4
-                        })
-                        .attach("over", coords => service.tooltip.showAt(coords, tooltipDe(v), 1))
-                        .attach("out", () => service.tooltip.hide());
-                    circles.push(circle);
+            // No se dibuja nada en el mapa: el estado se agrega a los activos nativos de Geotab.
+            //   - Tooltip: al pasar sobre un vehículo, tooltip.show() suma el tramo al tooltip nativo.
+            //   - Menú del vehículo: un ítem con el tramo actual que lleva a su fila en el panel.
+            //   - Click en el vehículo: resalta su fila en el panel.
+            const vehiculoPorId = id => vehiculos.find(v => v.id === id) || null;
+            const EVENTO_MENU = "monSupeVerEnPanel";
+
+            function enlazarActivosNativos() {
+                service.events.attach("over", data => {
+                    if (!data || data.type !== "device" || !data.entity) return;
+                    const v = vehiculoPorId(data.entity.id);
+                    if (v) service.tooltip.show(tooltipDe(v), 1);
                 });
+
+                service.events.attach("click", data => {
+                    if (!data || data.type !== "device" || !data.entity) return;
+                    if (vehiculoPorId(data.entity.id)) resaltarFila(data.entity.id);
+                });
+
+                service.actionList.attachMenu("device", (menuName, data) => {
+                    const v = data && data.device ? vehiculoPorId(data.device.id) : null;
+                    if (!v) return [];
+                    return [{
+                        title: `SUPE: ${etiquetaEstado(v)} · ${formatDuracion(Date.now() - v.desde)}`,
+                        clickEvent: EVENTO_MENU,
+                        data: { id: v.id }
+                    }];
+                });
+
+                // La documentación no es clara sobre qué evento dispara el botón (el nombre de
+                // clickEvent o "CustomEvent"): se escuchan los dos.
+                const alClickMenu = data => {
+                    const id = data && (data.id || (data.data && data.data.id));
+                    if (id) resaltarFila(id);
+                };
+                service.actionList.attach(EVENTO_MENU, alClickMenu);
+                service.actionList.attach("CustomEvent", alClickMenu);
             }
 
-            function clearVehiculos() {
-                circles.forEach(c => c.remove());
-                circles = [];
+            // Muestra la fila del vehículo en el panel (quita filtros y búsqueda si la ocultan)
+            function resaltarFila(id) {
+                let row = elt.querySelector(`.mon-row[data-id="${CSS.escape(id)}"]`);
+                if (!row) {
+                    currentFilter = 'all';
+                    currentSearch = '';
+                    elt.querySelector("#mon-search").value = '';
+                    elt.querySelectorAll("[data-filter]").forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+                    renderLista(vehiculos);
+                    row = elt.querySelector(`.mon-row[data-id="${CSS.escape(id)}"]`);
+                }
+                if (!row) return;
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                row.classList.add('mon-row-focus');
+                setTimeout(() => row.classList.remove('mon-row-focus'), 2000);
             }
 
             function filtrar(lista) {
@@ -748,6 +781,7 @@
                     grupo.sort((a, b) => (a.desde || 0) - (b.desde || 0)).forEach(v => {
                         const row = document.createElement('div');
                         row.className = 'mon-row' + (v.lat && v.lon ? '' : ' mon-row-disabled');
+                        row.dataset.id = v.id;
                         const dur = v.desde ? formatDuracion(Date.now() - v.desde) : '-';
 
                         const badges = [
@@ -794,7 +828,6 @@
                 const statusEl = elt.querySelector("#mon-status");
                 try {
                     await actualizarEstados();
-                    drawVehiculos(vehiculos);
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -850,6 +883,7 @@
                 #mon-root .mon-row { padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:8px; cursor:pointer; transition:all 0.15s; }
                 #mon-root .mon-row:hover { background:#f0f4ff; border-color:#3b82f6; }
                 #mon-root .mon-row-disabled { opacity:0.6; cursor:not-allowed; }
+                #mon-root .mon-row-focus { background:#fef3c7; border-color:#fbbf24; box-shadow:0 2px 8px rgba(251,191,36,0.25); }
                 #mon-root .mon-row-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
                 #mon-root .mon-name { font-weight:700; font-size:14px; color:#1f2937; }
                 #mon-root .mon-plate { font-size:11px; color:#6b7280; font-family:Consolas,monospace; }
@@ -910,6 +944,7 @@
                 }
 
                 setupEventListeners();
+                enlazarActivosNativos();
                 const statusEl = elt.querySelector("#mon-status");
                 try {
                     statusEl.textContent = "Cargando vehículos y geocercas...";
