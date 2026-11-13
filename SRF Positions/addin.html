@@ -87,6 +87,8 @@ render_pipeline
         // y la primera carga fallaba, dejando GTB_STATUSINFO vacío en el primer render.
         let status_initPromise = null;
         let status_refreshIntervalId = null;
+        // Lo asigna el add-in (renderAll) una vez hecho el primer dibujo
+        let status_onCommsChange = null;
 
         function status_start() {
             status_initPromise = (async () => {
@@ -274,7 +276,18 @@ render_pipeline
                     };
                 }
 
+                // ¿Algún GO cambió de "comunica" a "no comunica" o al revés?
+                const prev = GTB_STATUSINFO;
+                const commsChanged = Object.keys(devices).some(id =>
+                    prev[id] && prev[id].communicates !== devices[id].communicates);
+
                 GTB_STATUSINFO = devices;
+
+                // Redibujo inmediato: el GO que vuelve a comunicar se oculta sin esperar al ciclo de 30 s
+                if (commsChanged && status_onCommsChange) {
+                    dbg("[StatusInfo] Cambió la comunicación de algún GO: redibujo");
+                    status_onCommsChange();
+                }
 
                 // Conductor nuevo que no tenemos: recargar la lista (como mucho cada 10 min)
                 const missing = Object.values(devices).some(d => d.driverId && !(d.driverId in GTB_DRIVERS));
@@ -761,18 +774,6 @@ render_pipeline
             stopped: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#0078D3" stroke="#FFFFFF" stroke-width="2"/><path d="M0 1.25C0 .835786.335786.5.75.5h7.5c.41421 0 .75.335786.75.75v7.5c0 .41421-.33579.75-.75.75H.75C.335786 9.5 0 9.16421 0 8.75z" transform="translate(-4.5, -4.5)" fill="#FFFFFF" stroke="#FFFFFF"/></g></svg>'
         };
 
-        // Data URIs ya armados; la flecha se cachea por rumbo redondeado a 5°
-        const icon_uriCache = {};
-        function icon_getUri(state, bearing) {
-            const rot = state === 'moving' ? (Math.round((bearing || 0) / 5) * 5) % 360 : 0;
-            const key = `${state}:${rot}`;
-            if (!icon_uriCache[key]) {
-                const svg = ICON_SVG[state].replace('{ROT}', rot);
-                icon_uriCache[key] = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-            }
-            return icon_uriCache[key];
-        }
-
         // Rumbo (grados desde el norte, sentido horario) entre dos posiciones
         function icon_bearingBetween(lat1, lon1, lat2, lon2) {
             const toRad = d => d * Math.PI / 180;
@@ -868,12 +869,11 @@ render_pipeline
         }
 
         // ====== ETIQUETA "UNIDAD (CONDUCTOR)" ======
-        // Se dibuja como un SVG del doble de ancho centrado en el equipo: la mitad izquierda queda
-        // vacía (debajo del ícono) y el recuadro arranca a la derecha del ícono, como la etiqueta nativa.
+        // Va dentro del mismo SVG que el ícono (marker_get): el SVG mide el doble del ancho
+        // necesario y se centra en el equipo; el recuadro arranca a la derecha del ícono.
         const LABEL_FONT = "600 12px 'Segoe UI', Roboto, Arial, sans-serif";
         const LABEL_HEIGHT = 22;
         const LABEL_GAP = ICON_SIZE / 2 + 4;
-        const label_uriCache = {};
         let label_ctx = null;
 
         function label_textWidth(text) {
@@ -890,23 +890,33 @@ render_pipeline
             return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
-        // Devuelve { uri, width, height } de la etiqueta
-        function label_get(text) {
-            if (label_uriCache[text]) return label_uriCache[text];
-            const boxW = label_textWidth(text) + 14;
+
+        // Ícono + etiqueta en UN solo SVG, para que se muevan juntos. Mismo ancho que la etiqueta,
+        // con el ícono centrado (el centro del marker es la posición del equipo).
+        const marker_uriCache = {};
+        function marker_get(state, bearing, labelText) {
+            const rot = state === 'moving' ? (Math.round((bearing || 0) / 5) * 5) % 360 : 0;
+            const key = `${state}:${rot}:${labelText}`;
+            if (marker_uriCache[key]) return marker_uriCache[key];
+
+            const boxW = label_textWidth(labelText) + 14;
             const half = LABEL_GAP + boxW + 2;
             const width = half * 2;
-            const h = LABEL_HEIGHT;
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">` +
-                `<rect x="${half + LABEL_GAP}" y="1" width="${boxW}" height="${h - 2}" rx="4" ry="4" fill="#ffffff" stroke="#c4cdd5" stroke-width="1"/>` +
-                `<text x="${half + LABEL_GAP + 7}" y="${h / 2 + 4}" font-family="'Segoe UI', Roboto, Arial, sans-serif" font-size="12" font-weight="600" fill="#25477b">${label_escape(text)}</text>` +
+            const height = Math.max(ICON_SIZE, LABEL_HEIGHT);
+            const boxY = (height - LABEL_HEIGHT) / 2;
+            const iconSvg = ICON_SVG[state].replace('{ROT}', rot)
+                .replace('<svg xmlns="http://www.w3.org/2000/svg" ', `<svg x="${half - ICON_SIZE / 2}" y="${(height - ICON_SIZE) / 2}" `);
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+                `<rect x="${half + LABEL_GAP}" y="${boxY + 1}" width="${boxW}" height="${LABEL_HEIGHT - 2}" rx="4" ry="4" fill="#ffffff" stroke="#c4cdd5" stroke-width="1"/>` +
+                `<text x="${half + LABEL_GAP + 7}" y="${boxY + LABEL_HEIGHT / 2 + 4}" font-family="'Segoe UI', Roboto, Arial, sans-serif" font-size="12" font-weight="600" fill="#25477b">${label_escape(labelText)}</text>` +
+                iconSvg +
                 `</svg>`;
-            label_uriCache[text] = {
+            marker_uriCache[key] = {
                 uri: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg),
                 width,
-                height: h
+                height
             };
-            return label_uriCache[text];
+            return marker_uriCache[key];
         }
 
         // Nombre del conductor del GO asociado. Sin conductor (UnknownDriverId) o no encontrado:
@@ -944,7 +954,8 @@ render_pipeline
 
                 let marker;
                 try {
-                    marker = service.canvas.marker(center, ICON_SIZE, ICON_SIZE, icon_getUri(icon.state, icon.bearing), 10);
+                    const m = marker_get(icon.state, icon.bearing, labelText);
+                    marker = service.canvas.marker(center, m.width, m.height, m.uri, 10);
                 } catch (err) {
                     // Respaldo: si el mapa no acepta el ícono, se dibuja un círculo
                     console.error("[MAP] No se pudo dibujar el ícono, uso círculo:", err);
@@ -976,14 +987,6 @@ render_pipeline
                         service.tooltip.hide();
                     });
                 items.push(marker);
-
-                // Etiqueta "Unidad (Conductor)" a la derecha del ícono, por debajo de él
-                try {
-                    const label = label_get(labelText);
-                    items.push(service.canvas.marker(center, label.width, label.height, label.uri, 9));
-                } catch (err) {
-                    dbg("[MAP] No se pudo dibujar la etiqueta:", err);
-                }
 
                 // Primero se dibuja lo nuevo y después se borra lo viejo: evita el parpadeo
                 anim_clearEntry(e);
@@ -1651,6 +1654,7 @@ render_pipeline
                 Promise.allSettled([status_initPromise, srf_initPromise, mkp_initPromise, fcs_initPromise]).then(() => {
                     renderAll();
                     render_refreshIntervalId = setInterval(renderAll, 30000);
+                    status_onCommsChange = renderAll;
                 });
 
             }).catch(err => {
