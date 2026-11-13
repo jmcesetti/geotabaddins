@@ -268,6 +268,7 @@ render_pipeline
                         // Posición del GO: se usa para centrar el mapa si la cámara no trae ubicación
                         lat: device.latitude,
                         lon: device.longitude,
+                        speed: device.speed,
                         // Último conductor asignado al GO
                         driverId: drivers_idOf(device.driver)
                     };
@@ -794,18 +795,55 @@ render_pipeline
         // Surfsight no informa rumbo: se calcula con el desplazamiento entre refrescos.
         const icon_track = {};
 
-        // Devuelve { state, bearing } para un equipo y actualiza su memoria
-        function icon_resolve(device, nowMs) {
-            const key = device.imei || device.name;
-            const t = icon_track[key] || (icon_track[key] = {});
-            const lat = parseFloat(device.lat);
-            const lon = parseFloat(device.lon);
-            const reportMs = device.lastSeenOnline ? new Date(device.lastSeenOnline).getTime() : NaN;
-            const isMoving = Number(device.speed) > 0;
+        // ====== POSICIÓN MÁS RECIENTE ======
+        // Candidatas: la de la cámara (fecha del último reporte) y la del GO asociado
+        // (DeviceStatusInfo.dateTime). Se usa la más nueva; a igual fecha, la de la cámara.
+        function pos_time(dateString) {
+            const ms = dateString ? new Date(dateString).getTime() : NaN;
+            return isNaN(ms) ? -Infinity : ms;
+        }
 
-            // Rumbo: el que informe la fuente (FCS vía DeviceStatusInfo); si no, por desplazamiento
-            if (typeof device.bearing === 'number' && device.bearing >= 0) {
-                t.bearing = device.bearing;
+        function pos_resolve(device) {
+            const candidates = [];
+            if (device.lat && device.lon) {
+                candidates.push({
+                    src: 'CAM',
+                    lat: parseFloat(device.lat),
+                    lon: parseFloat(device.lon),
+                    time: pos_time(device.lastSeenOnline),
+                    dateString: device.lastSeenOnline,
+                    speed: device.speed,
+                    bearing: device.bearing
+                });
+            }
+            const go = device.goStatus;
+            if (go && go.lat && go.lon) {
+                candidates.push({
+                    src: 'GO',
+                    lat: parseFloat(go.lat),
+                    lon: parseFloat(go.lon),
+                    time: pos_time(go.dateTime),
+                    dateString: go.dateTime,
+                    speed: go.speed,
+                    bearing: go.bearing
+                });
+            }
+            if (candidates.length === 0) return null;
+            return candidates.reduce((best, c) => c.time > best.time ? c : best);
+        }
+
+        // Devuelve { state, bearing } para un equipo según su posición elegida (pos_resolve)
+        // y actualiza su memoria
+        function icon_resolve(key, pos, nowMs) {
+            const t = icon_track[key] || (icon_track[key] = {});
+            const lat = pos.lat;
+            const lon = pos.lon;
+            const reportMs = pos.time === -Infinity ? NaN : pos.time;
+            const isMoving = Number(pos.speed) > 0;
+
+            // Rumbo: el que informe la fuente (DeviceStatusInfo del GO); si no, por desplazamiento
+            if (typeof pos.bearing === 'number' && pos.bearing >= 0) {
+                t.bearing = pos.bearing;
             } else if (t.lat != null && icon_distanceM(t.lat, t.lon, lat, lon) > 15) {
                 t.bearing = icon_bearingBetween(t.lat, t.lon, lat, lon);
             }
@@ -917,7 +955,8 @@ render_pipeline
 
                 marker
                     .attach("over", function (coords) {
-                        const speed = device.speed ? Math.ceil(device.speed) : '0';
+                        const pos = device.pos || {};
+                        const speed = pos.speed ? Math.ceil(pos.speed) : '0';
                         service.tooltip.showAt(
                             coords,
                             {
@@ -925,8 +964,9 @@ render_pipeline
                                 secondary: [
                                     ICON_LABELS[icon.state],
                                     getStatusDisplay(device.status),
-                                    formatDeviceDate(device.lastSeenOnline),
-                                    speed + " km/h"
+                                    formatDeviceDate(pos.dateString),
+                                    speed + " km/h",
+                                    pos.src === 'GO' ? 'Posición del GO' : 'Posición de la cámara'
                                 ]
                             },
                             1
@@ -1058,6 +1098,8 @@ render_pipeline
                     } else {
                         device.mapState = 'goLive';
                     }
+                    // Posición a usar: la más reciente entre cámara y GO
+                    device.pos = pos_resolve(device);
                 });
 
                 // El panel lista TODAS las cámaras encontradas; el mapa solo las 'onMap'
@@ -1071,11 +1113,13 @@ render_pipeline
                 dbg("[RENDER] mapState:", JSON.stringify(stateCounts),
                     "| GTB_DEVICES:", Object.keys(GTB_DEVICES).length,
                     "| GTB_STATUSINFO:", Object.keys(GTB_STATUSINFO).length,
-                    "| onMap con ubicación de cámara:", devices.filter(d => d.lat && d.lon).length);
+                    "| onMap con posición:", devices.filter(d => d.pos).length,
+                    "(GO más reciente:", devices.filter(d => d.pos && d.pos.src === 'GO').length + ")");
                 DEBUG && console.table(combinedDevices.map(d => ({
                     name: d.name, source: d.source, imei: d.imei, sn: d.sn, gtbId: d.gtbId, match: d.gtbMatch || (d.gtbId ? 'sn' : '-'),
                     communicates: d.goStatus ? d.goStatus.communicates : '(sin status)',
-                    mapState: d.mapState, lat: d.lat, lon: d.lon
+                    mapState: d.mapState, camLat: d.lat, camLon: d.lon, camTime: d.lastSeenOnline,
+                    goTime: d.goStatus ? d.goStatus.dateTime : null, pos: d.pos ? d.pos.src : '-'
                 })));
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
@@ -1084,15 +1128,16 @@ render_pipeline
                 const nowMs = Date.now();
                 const seen = new Set();
                 devices.forEach(device => {
-                    if (!device.lat || !device.lon) {
+                    const pos = device.pos;
+                    if (!pos) {
                         return;
                     }
 
                     const key = device.imei || device.name;
                     seen.add(key);
-                    const icon = icon_resolve(device, nowMs);
+                    const icon = icon_resolve(key, pos, nowMs);
                     device.mapIcon = icon.state;
-                    const target = { lat: parseFloat(device.lat), lng: parseFloat(device.lon) };
+                    const target = { lat: pos.lat, lng: pos.lon };
                     const driverName = label_driverName(device);
 
                     let e = anim_entries[key];
@@ -1208,18 +1253,19 @@ render_pipeline
 
                         // Posición para centrar:
                         //   - GO comunicando: la del GO (es el ícono que muestra el mapa nativo)
-                        //   - si no: la de la cámara; si no tiene, la última del GO asociado
+                        //   - si no: la más reciente entre cámara y GO (device.pos)
                         const goStatus = device.goStatus;
-                        const camHasLocation = !!(device.lat && device.lon);
                         const goHasLocation = !!(goStatus && goStatus.lat && goStatus.lon);
-                        const useGo = goHasLocation && (device.mapState === 'goLive' || !camHasLocation);
-                        const target = useGo ? { lat: goStatus.lat, lon: goStatus.lon }
-                                     : camHasLocation ? { lat: device.lat, lon: device.lon }
-                                     : null;
+                        const pos = device.mapState === 'goLive' && goHasLocation
+                            ? { src: 'GO', lat: goStatus.lat, lon: goStatus.lon }
+                            : device.pos;
+                        const target = pos ? { lat: pos.lat, lon: pos.lon } : null;
 
-                        const locationStatus = useGo ? (device.mapState === 'goLive' ? '✓ Ubicación del GO' : '✓ Ubicación del GO (cámara sin posición)')
-                                             : camHasLocation ? '✓ Ubicación de la cámara'
-                                             : '✗ Ubicación no disponible';
+                        const locationStatus = !pos ? '✗ Ubicación no disponible'
+                                             : pos.src === 'CAM' ? '✓ Ubicación de la cámara'
+                                             : device.mapState === 'goLive' ? '✓ Ubicación del GO'
+                                             : (device.lat && device.lon) ? '✓ Ubicación del GO (más reciente que la cámara)'
+                                             : '✓ Ubicación del GO (cámara sin posición)';
                         const locationStyle = target ? 'color:#065f46;' : 'color:#dc2626;';
 
                         // Badge de visibilidad en el mapa
