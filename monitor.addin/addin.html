@@ -1595,30 +1595,35 @@
             // ─────────────────────────────────────────────────────────────────
             //  FILTRO BIDIRECCIONAL CON EL MAPA (vehículos visibles)
             // ─────────────────────────────────────────────────────────────────
-            // La selección de vehículos del mapa vive en el estado de la página (page.get/set,
-            // clave liveVehicleIds, la misma que aparece en la URL del mapa).
-            //   Add-in -> mapa: con un filtro de tramo o una búsqueda activos, el mapa muestra
-            //     solo esas unidades; al volver a "Todos" se restaura la selección del usuario.
-            //   Mapa -> add-in: si el usuario elige activos en el mapa, el add-in se limita a esos.
-            // Lo que pone el add-in vuelve como stateChange: se reconoce por su firma y se ignora.
+            // La selección de vehículos del mapa es la clave liveVehicleIds del estado de la página
+            // (en la URL: #map,liveVehicleIds:!(b468,b469),...). page.get() la devuelve como texto JSON.
+            // page.set() NO sirve para cambiarla: escribe en un espacio propio de los add-ins
+            // (aparece en la URL como mapaddin-liveVehicleIds). La única vía documentada para
+            // cambiar el estado real del mapa es page.go("map", estado).
+            //   Add-in -> mapa: al elegir un tramo o buscar, el mapa muestra solo esas unidades;
+            //     al volver a "Todos" se restaura la selección del usuario. Solo por acción del
+            //     usuario: el refresco periódico no navega.
+            //   Mapa -> add-in: la selección de activos del usuario limita el add-in.
+            // Si la navegación recarga el add-in, el filtro elegido se recupera de sessionStorage.
             const MAPA_CLAVE = "liveVehicleIds";
             const SYNC_STORAGE_KEY = "monitorSupe.syncMapa";
+            const MAPA_PENDIENTE_KEY = "monitorSupe.mapaPendiente";
             let syncMapa = true;
             try { syncMapa = localStorage.getItem(SYNC_STORAGE_KEY) !== "0"; } catch (e) { /* sin storage */ }
             let mapa_original;              // selección del usuario antes de filtrar (undefined = el add-in no tocó el mapa)
             let mapa_firmaPropia = null;    // firma de lo último que puso el add-in
             let mapa_errorLogueado = false;
 
-            // Ids de la selección del mapa: null = todos (sin selección o "all")
+            // Ids de la selección del mapa: null = todos (sin selección, "all" o "[]")
             function mapa_ids(valor) {
                 if (valor == null || valor === '') return null;
                 if (typeof valor === 'string') {
                     if (/^all$/i.test(valor.trim())) return null;
                     const ids = valor.match(/b[0-9A-Za-z]+/g);
-                    return ids && ids.length ? ids : null;      // "[]": sin selección, no se filtra
+                    return ids && ids.length ? ids : null;
                 }
                 const ids = filtro_extraerIds(valor);
-                return Array.isArray(valor) || ids.length ? ids : null;
+                return ids.length ? ids : null;
             }
             const mapa_firma = ids => ids == null ? 'ALL' : ids.slice().sort().join(',');
 
@@ -1629,11 +1634,35 @@
                 FILTRO_ACTIVOS_N = ids ? ids.length : 0;
             }
 
-            // MyGeotab guarda la selección como texto JSON ('["b58A","b584",...]'): se escribe igual
-            async function mapa_set(valor, firma) {
+            // page.get() entrega los valores como texto JSON; page.go() necesita los valores reales
+            function mapa_valorReal(v) {
+                if (typeof v !== 'string') return v;
+                const s = v.trim();
+                if (!/^[\[{"]/.test(s)) return v;
+                try { return JSON.parse(s); } catch (e) { return v; }
+            }
+
+            // Navega al mapa con la misma vista y otra selección de vehículos.
+            // ids: array de ids, o null para volver a "todos".
+            async function mapa_navegar(ids, firma) {
                 mapa_firmaPropia = firma;
                 try {
-                    await service.page.set(MAPA_CLAVE, Array.isArray(valor) ? JSON.stringify(valor) : valor);
+                    const st = (await service.page.get()) || {};
+                    const estado = {};
+                    Object.keys(st).forEach(k => {
+                        if (k.indexOf('mapaddin-') === 0) return;     // claves propias de add-ins
+                        estado[k] = mapa_valorReal(st[k]);
+                    });
+                    estado[MAPA_CLAVE] = ids == null ? "all" : ids;
+                    // Por si la navegación recarga el add-in: el filtro elegido sobrevive
+                    try {
+                        sessionStorage.setItem(MAPA_PENDIENTE_KEY, JSON.stringify({
+                            t: Date.now(), filtro: currentFilter, busqueda: currentSearch,
+                            original: mapa_original === undefined ? '__nada__' : mapa_original, firma
+                        }));
+                    } catch (e) { /* sin storage */ }
+                    initLog("[MAPA] Navegando al mapa con", ids == null ? "todos los vehículos" : `${ids.length} vehículos`);
+                    await service.page.go("map", estado);
                 } catch (err) {
                     if (!mapa_errorLogueado) console.error("[MAPA] No se pudo filtrar los vehículos del mapa:", err);
                     mapa_errorLogueado = true;
@@ -1645,14 +1674,14 @@
                 if (mapa_original === undefined) return;
                 const orig = mapa_original;
                 mapa_original = undefined;
-                await mapa_set(orig == null ? "[]" : orig, mapa_firma(mapa_ids(orig)));
+                const ids = mapa_ids(orig);
+                await mapa_navegar(ids, mapa_firma(ids));
             }
 
-            // Add-in -> mapa. Se llama en cada render: solo escribe si cambió el conjunto de unidades.
+            // Add-in -> mapa: solo si cambió el conjunto de unidades a mostrar
             async function mapa_aplicar() {
-                if (!service.page || typeof service.page.set !== 'function') return;
-                const filtrando = syncMapa && service.page.active !== false
-                    && (currentFilter !== 'all' || currentSearch.trim() !== '');
+                if (!service.page || typeof service.page.go !== 'function') return;
+                const filtrando = syncMapa && (currentFilter !== 'all' || currentSearch.trim() !== '');
                 if (!filtrando) return mapa_restaurar();
                 const ids = filtrar(vehiculos).map(v => v.id);
                 const firma = mapa_firma(ids);
@@ -1665,7 +1694,7 @@
                         mapa_original = null;
                     }
                 }
-                await mapa_set(ids, firma);
+                await mapa_navegar(ids, firma);
             }
 
             // Mapa -> add-in: cambios de la selección de vehículos hechos por el usuario
@@ -1690,29 +1719,51 @@
                 renderAll();
             }
 
+            // Si el add-in se recargó por una navegación propia (hace menos de 1 min), se
+            // retoma el filtro elegido y la selección original del usuario
+            function mapa_recuperarPendiente() {
+                let p = null;
+                try {
+                    p = JSON.parse(sessionStorage.getItem(MAPA_PENDIENTE_KEY) || 'null');
+                    sessionStorage.removeItem(MAPA_PENDIENTE_KEY);
+                } catch (e) { /* sin storage */ }
+                if (!p || Date.now() - p.t > 60e3) return false;
+                currentFilter = p.filtro || 'all';
+                currentSearch = p.busqueda || '';
+                elt.querySelector("#mon-search").value = currentSearch;
+                elt.querySelectorAll("[data-filter]").forEach(b => b.classList.toggle('active', b.dataset.filter === currentFilter));
+                mapa_original = p.original === '__nada__' ? undefined : p.original;
+                mapa_firmaPropia = p.firma;
+                if (mapa_original !== undefined) mapa_adoptarSeleccion(mapa_original);
+                initLog("[MAPA] Filtro recuperado tras la navegación:", currentFilter, currentSearch || '');
+                return true;
+            }
+
             async function mapa_iniciar() {
+                const recuperado = mapa_recuperarPendiente();
                 try {
                     const st = await service.page.get();
                     initLog("[MAPA] Estado de la página:", st);
-                    if (st && st[MAPA_CLAVE] !== undefined) mapa_adoptarSeleccion(st[MAPA_CLAVE]);
+                    // Si el mapa muestra lo que puso el add-in, la selección del usuario es la original
+                    const valor = st ? st[MAPA_CLAVE] : undefined;
+                    if (valor !== undefined && !(recuperado && mapa_firma(mapa_ids(valor)) === mapa_firmaPropia)) {
+                        mapa_adoptarSeleccion(valor);
+                    }
                 } catch (err) {
                     console.error("[MAPA] No se pudo leer el estado de la página:", err);
                 }
                 try {
                     service.page.attach("stateChange", mapa_alCambiarEstado);
-                    // Al pasar a otra pestaña de add-in se devuelve el mapa como estaba; al volver, se reaplica
-                    service.page.attach("blur", () => { mapa_restaurar(); });
-                    service.page.attach("focus", () => { mapa_aplicar(); });
                 } catch (err) {
                     console.error("[MAPA] No se pudo escuchar el estado de la página:", err);
                 }
             }
 
-            // Desde la UI (tipeo en la búsqueda, clicks seguidos en filtros): una sola escritura al final
+            // Desde la UI (tipeo en la búsqueda, clicks seguidos en filtros): una sola navegación al final
             let mapa_timer = null;
             function mapa_aplicarPronto() {
                 clearTimeout(mapa_timer);
-                mapa_timer = setTimeout(mapa_aplicar, 350);
+                mapa_timer = setTimeout(mapa_aplicar, 500);
             }
 
             function toggleSyncMapa(on) {
@@ -1730,7 +1781,6 @@
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
                     dibujarEtiquetas();
-                    mapa_aplicar();
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
                     const partes = [];
                     if (FILTRO_GRUPOS) partes.push(`${FILTRO_GRUPOS_N} grupo${FILTRO_GRUPOS_N === 1 ? '' : 's'}`);
