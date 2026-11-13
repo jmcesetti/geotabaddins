@@ -955,7 +955,10 @@ render_pipeline
                 let marker;
                 try {
                     const m = marker_get(icon.state, icon.bearing, labelText);
-                    marker = service.canvas.marker(center, m.width, m.height, m.uri, 10);
+                    // marker() ancla la imagen por su esquina superior izquierda: dx/dy la centran
+                    // en la posición (así lo hace el ejemplo oficial de Geotab, sdk-map-addin-samples)
+                    marker = service.canvas.marker(center, m.width, m.height, m.uri, 10)
+                        .change({ "dx": -m.width / 2, "dy": -m.height / 2 });
                 } catch (err) {
                     // Respaldo: si el mapa no acepta el ícono, se dibuja un círculo
                     console.error("[MAP] No se pudo dibujar el ícono, uso círculo:", err);
