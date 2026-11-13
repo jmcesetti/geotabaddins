@@ -2,13 +2,13 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>Monitor SUPE Map Add-in</title>
+    <title>Monitor Cesetti Map Add-in</title>
 </head>
 <body>
     <div id="addin-root"></div>
 
     <!--
-    Monitor en tiempo real de los vehículos afectados a SUPE y su tramo actual.
+    Monitor Cesetti: monitor en tiempo real de los vehículos afectados a SUPE y su tramo actual.
 
     Replica en el navegador la misma definición de tramos que feed_exception_events.py
     (GestorCiclos), pero sólo para saber en qué tramo está cada unidad AHORA:
@@ -803,7 +803,7 @@
                 if (v.espera) sec.push(`Espera: ${formatDuracion(v.espera.hasta - v.espera.desde)}`);
                 if (v.km != null) sec.push(`${v.km} km`);
                 return {
-                    main: `SUPE: ${etiquetaEstado(v)}${v.provisional ? ' (validando)' : ''}`,
+                    main: `Cesetti: ${etiquetaEstado(v)}${v.provisional ? ' (validando)' : ''}`,
                     secondary: sec
                 };
             }
@@ -838,7 +838,7 @@
                     const v = data && data.device ? vehiculoPorId(data.device.id) : null;
                     if (!v) return [];
                     return [{
-                        title: `SUPE: ${etiquetaEstado(v)} · ${formatDuracion(Date.now() - v.desde)}`,
+                        title: `Cesetti: ${etiquetaEstado(v)} · ${formatDuracion(Date.now() - v.desde)}`,
                         clickEvent: EVENTO_MENU,
                         data: { id: v.id }
                     }];
@@ -1532,7 +1532,7 @@
                 setCargando(false);
 
                 if (!ok) {
-                    const fallas = [!okStatus && 'posiciones', !okEventos && 'eventos SUPE', !okRender && 'cálculo'].filter(Boolean);
+                    const fallas = [!okStatus && 'posiciones', !okEventos && 'eventos', !okRender && 'cálculo'].filter(Boolean);
                     statusEl.textContent = `Falló la actualización (${fallas.join(', ')}). Ver consola.`;
                     statusEl.classList.add("mon-error");
                 }
@@ -1761,7 +1761,7 @@
                     <div class="mon-progress"></div>
                     <div class="mon-header">
                       <div class="mon-title">
-                        <h3>Monitor SUPE</h3>
+                        <h3>Monitor Cesetti</h3>
                         <div class="mon-title-btns">
                           <button id="mon-dash-btn" class="mon-btn" title="Estadísticas del día">${ICO.dash}<span>Dashboard</span></button>
                           <button id="mon-refresh" class="mon-btn mon-btn-primary" title="Actualizar ahora">${ICO.refresh}<span>Actualizar</span></button>
@@ -1796,7 +1796,7 @@
                     elt.querySelector("#mon-root").innerHTML = `
                         <div style="flex:1; display:flex; align-items:center; justify-content:center; text-align:center; color:#323130;">
                           <div>
-                            <h2 style="margin-bottom:10px; font-weight:600;">Monitor SUPE</h2>
+                            <h2 style="margin-bottom:10px; font-weight:600;">Monitor Cesetti</h2>
                             <div style="color:#605e5c;">No tiene acceso para visualizar este elemento</div>
                           </div>
                         </div>
@@ -1826,7 +1826,7 @@
                         console.error("[FILTRO] No se pudo escuchar filterChange:", err);
                     }
 
-                    statusEl.textContent = `Cargando eventos SUPE (${LOOKBACK_HORAS} h)...`;
+                    statusEl.textContent = `Cargando eventos (${LOOKBACK_HORAS} h)...`;
                     await ev_refreshData();
 
                     statusEl.textContent = "Resolviendo geocercas de ingreso...";
