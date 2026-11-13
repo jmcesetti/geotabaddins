@@ -785,15 +785,15 @@
                 }).format(new Date(ms));
             }
 
-            // Tiempo como cuenta regresiva: 01:30hs (minutos redondeados hacia arriba)
+            // Tiempo como cuenta regresiva: 01:30h (minutos redondeados hacia arriba)
             function formatHHMM(ms) {
                 const min = Math.max(0, Math.ceil(ms / 60000));
-                return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}hs`;
+                return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}h`;
             }
 
             // ETA de un "Camino a ...": tiempo que falta para llegar. Se recalcula en cada render
             // (cada 30 s), así que baja a medida que pasa el tiempo. Pasada la llegada estimada
-            // muestra el atraso: ETA +00:20hs.
+            // pasa a mostrar el atraso: Atrasado +00:20h (en rojo).
             function etaInfo(v) {
                 if (!v.eta) return null;
                 const resta = v.eta.llegada - Date.now();
@@ -804,7 +804,7 @@
                     hora: formatHoraCorta(v.eta.llegada),
                     atrasado,
                     tiempo,
-                    corto: `ETA ${tiempo}`,
+                    corto: atrasado ? `Atrasado ${tiempo}` : `ETA ${tiempo}`,
                     base: `Estimado con su último carreteo en este sentido: ${formatDuracion(r.dur)}`
                         + (r.desde || r.hasta ? ` (${r.desde || '?'} → ${r.hasta || '?'}, salió ${formatHora(r.salida)})` : '')
                 };
@@ -880,7 +880,7 @@
             function tooltipDe(v) {
                 const e = etaInfo(v);
                 const sec = [e
-                    ? `ETA ${e.tiempo}${e.atrasado ? ' (atrasado)' : ''} · llegada estimada ${e.hora} · salió ${formatHora(v.desde)}`
+                    ? `${e.corto} · llegada estimada ${e.hora} · salió ${formatHora(v.desde)}`
                     : `En el tramo: ${formatDuracion(Date.now() - v.desde)} · desde ${formatHora(v.desde)}`];
                 if (v.zona) sec.push(v.zona);
                 if (v.espera) sec.push(`Espera: ${formatDuracion(v.espera.hasta - v.espera.desde)}`);
@@ -1035,24 +1035,29 @@
                 }
             }
 
-            function etq_svg(texto, color) {
-                const key = `${color}|${texto}`;
+            // `rojo` (opcional): sufijo que se escribe en rojo a continuación del texto (atraso del ETA)
+            function etq_svg(texto, color, rojo) {
+                const key = `${color}|${texto}|${rojo || ''}`;
                 if (etq_cache[key]) return etq_cache[key];
                 if (Object.keys(etq_cache).length > 2000) etq_cache = {};   // las duraciones cambian: se recicla
                 // Paralelogramo del mismo alto y ancho que el recuadro: los lados se inclinan ETQ_SESGO px.
                 // El letter-spacing (0.3 px por carácter) no lo mide measureText: se suma aparte.
-                const ancho = Math.ceil(etq_anchoTexto(texto) + texto.length * 0.3) + 18;
+                const completo = texto + (rojo || '');
+                const ancho = Math.ceil(etq_anchoTexto(completo) + completo.length * 0.3) + 18;
                 const s = ETQ_SESGO, a = ETQ_ALTO - 0.5;
                 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${ancho}" height="${ETQ_ALTO}" viewBox="0 0 ${ancho} ${ETQ_ALTO}">` +
                     `<polygon points="${s + 0.5},0.5 ${ancho - 0.5},0.5 ${ancho - s - 0.5},${a} 0.5,${a}" fill="#ffffff" stroke="${color}" stroke-width="1" stroke-linejoin="miter"/>` +
                     `<polygon points="${s + 0.5},0.5 ${s + 4.5},0.5 4.5,${a} 0.5,${a}" fill="${color}"/>` +
-                    `<text x="11" y="${ETQ_ALTO / 2 + 4}" font-family="Roboto, 'Segoe UI', Arial, sans-serif" font-size="11" font-weight="600" letter-spacing="0.3" fill="#0f1a2b">${esc(texto)}</text>` +
+                    `<text x="11" y="${ETQ_ALTO / 2 + 4}" font-family="Roboto, 'Segoe UI', Arial, sans-serif" font-size="11" font-weight="600" letter-spacing="0.3" fill="#0f1a2b">${esc(texto)}${rojo ? `<tspan fill="${ETQ_ROJO}">${esc(rojo)}</tspan>` : ''}</text>` +
                     `</svg>`;
                 etq_cache[key] = { uri: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), ancho };
                 return etq_cache[key];
             }
 
-            const etq_texto = v => etiquetaEstado(v) + (v.eta ? ` · ${etaInfo(v).corto}`
+            const ETQ_ROJO = "#e0213f";
+            // Atrasado respecto del ETA: el atraso va en rojo y el recuadro se marca en rojo
+            const etq_atraso = v => { const e = etaInfo(v); return e && e.atrasado ? ` · ${e.corto}` : ''; };
+            const etq_texto = v => etiquetaEstado(v) + (v.eta ? (etaInfo(v).atrasado ? '' : ` · ${etaInfo(v).corto}`)
                 : (v.desde ? ` · ${formatDuracion(Date.now() - v.desde)}` : ''));
 
             // Redibujar markers en medio de un setBounds o un arrastre hace que MyGeotab vuelva
@@ -1078,7 +1083,8 @@
                         if (!v.lat || !v.lon) return;
                         try {
                             const cfg = ESTADOS[v.estado] || ESTADOS["Sin clasificar"];
-                            const m = etq_svg(etq_texto(v), cfg.color);
+                            const atraso = etq_atraso(v);
+                            const m = etq_svg(etq_texto(v), atraso ? ETQ_ROJO : cfg.color, atraso);
                             const marker = service.canvas.marker({ lat: v.lat, lng: v.lon }, m.ancho, ETQ_ALTO, m.uri, 9)
                                 .change({ "dx": ETQ_SEPARACION, "dy": -ETQ_ALTO / 2 });
                             marker
@@ -1209,7 +1215,7 @@
                         const e = etaInfo(v);
                         if (e) {
                             par('ETA', `<span title="${esc(e.base)}">`
-                                + (e.atrasado ? `<span class="mon-atrasado">${mono(e.tiempo)} atrasado</span>` : `<b class="mon-eta">${mono(e.tiempo)}</b>`)
+                                + (e.atrasado ? `<span class="mon-atrasado">Atrasado ${mono(e.tiempo)}</span>` : `<b class="mon-eta">${mono(e.tiempo)}</b>`)
                                 + ` <span class="mon-mute">llegada ~${mono(e.hora)}</span></span>`);
                             par('Salida', mono(formatHora(v.desde)));
                         } else {
@@ -1608,7 +1614,8 @@
                 if (valor == null || valor === '') return null;
                 if (typeof valor === 'string') {
                     if (/^all$/i.test(valor.trim())) return null;
-                    return valor.match(/b[0-9A-Za-z]+/g) || [];
+                    const ids = valor.match(/b[0-9A-Za-z]+/g);
+                    return ids && ids.length ? ids : null;      // "[]": sin selección, no se filtra
                 }
                 const ids = filtro_extraerIds(valor);
                 return Array.isArray(valor) || ids.length ? ids : null;
@@ -1622,10 +1629,11 @@
                 FILTRO_ACTIVOS_N = ids ? ids.length : 0;
             }
 
+            // MyGeotab guarda la selección como texto JSON ('["b58A","b584",...]'): se escribe igual
             async function mapa_set(valor, firma) {
                 mapa_firmaPropia = firma;
                 try {
-                    await service.page.set(MAPA_CLAVE, valor);
+                    await service.page.set(MAPA_CLAVE, Array.isArray(valor) ? JSON.stringify(valor) : valor);
                 } catch (err) {
                     if (!mapa_errorLogueado) console.error("[MAPA] No se pudo filtrar los vehículos del mapa:", err);
                     mapa_errorLogueado = true;
@@ -1637,7 +1645,7 @@
                 if (mapa_original === undefined) return;
                 const orig = mapa_original;
                 mapa_original = undefined;
-                await mapa_set(orig == null ? "all" : orig, mapa_firma(mapa_ids(orig)));
+                await mapa_set(orig == null ? "[]" : orig, mapa_firma(mapa_ids(orig)));
             }
 
             // Add-in -> mapa. Se llama en cada render: solo escribe si cambió el conjunto de unidades.
@@ -1918,7 +1926,7 @@
                 #mon-root .mon-kv dd { margin:0; color:var(--text); min-width:0; overflow-wrap:anywhere; }
                 #mon-root .mon-mono { font-family:var(--mono); font-size:11.5px; font-variant-numeric:tabular-nums; }
                 #mon-root .mon-mute { color:var(--text-mute); }
-                #mon-root .mon-atrasado { color:var(--warn); font-weight:600; }
+                #mon-root .mon-atrasado { color:var(--crit); font-weight:600; }
                 #mon-root .mon-eta { color:var(--neon); font-weight:600; }
 
                 /* Modo dashboard */
