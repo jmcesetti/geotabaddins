@@ -250,6 +250,9 @@
         let GTB_GRUPOS_HIJOS = {};
         let FILTRO_GRUPOS = null;
         let FILTRO_GRUPOS_N = 0;
+        // Activos elegidos por el usuario en el mapa (selección de vehículos). null = todos.
+        let FILTRO_ACTIVOS = null;
+        let FILTRO_ACTIVOS_N = 0;
 
         async function gtb_loadGrupos() {
             try {
@@ -591,6 +594,47 @@
             return null;
         }
 
+        // Tipo operativo de una visita: "Carga" | "Descarga" (mixtas por alternancia),
+        // otra etiqueta si no es ninguna, null si es de control, undefined si falta resolver la zona
+        function tipoOperativo(visita, visitas) {
+            if (visita.enter.rol !== "ENTER") return null;
+            const zona = zonaDeEnter(visita.enter);
+            if (zona === undefined) return undefined;
+            let tipo = zona ? zona.etiqueta : TIPO_DEFECTO;
+            if (tipo === "Carga/Descarga") {
+                const t = inferirMixta(visitas.filter(v => v.exit.af <= visita.enter.af));
+                if (t) tipo = t;
+            }
+            return tipo;
+        }
+
+        // ETA de un "Camino a ...": duración del último carreteo de la misma unidad en el mismo
+        // sentido (salida de una visita del mismo tipo hasta el ingreso a la siguiente Carga o
+        // Descarga; las visitas de control intermedias no lo cortan). Se prefiere el que salió
+        // de la misma geocerca; si no hay, el más reciente. null = sin referencia en la ventana.
+        function estimarEta(validas, visitas, tipoOrigen, zonaOrigen, salida) {
+            const tipoDestino = tipoOrigen === "Carga" ? "Descarga" : "Carga";
+            let mismaZona = null, cualquiera = null;
+            // La última visita válida es el origen del carreteo actual: se buscan las anteriores
+            for (let i = validas.length - 2; i >= 0 && !mismaZona; i--) {
+                if (tipoOperativo(validas[i], visitas) !== tipoOrigen) continue;
+                for (let j = i + 1; j < validas.length; j++) {
+                    const t = tipoOperativo(validas[j], visitas);
+                    if (t === null) continue;                      // control: sigue siendo el mismo viaje
+                    if (t !== tipoDestino) break;                  // volvió al mismo tipo o sin resolver
+                    const dur = validas[j].enter.af - validas[i].exit.af;
+                    if (dur <= 0 || dur > CARRETEO_MAX_HORAS * 3600e3) break;
+                    const zi = zonaDeEnter(validas[i].enter), zj = zonaDeEnter(validas[j].enter);
+                    const ref = { dur, desde: zi ? zi.name : null, hasta: zj ? zj.name : null, salida: validas[i].exit.af };
+                    if (!cualquiera) cualquiera = ref;
+                    if (zi && zonaOrigen && zi.id === zonaOrigen.id) mismaZona = ref;
+                    break;
+                }
+            }
+            const ref = mismaZona || cualquiera;
+            return ref ? { llegada: salida + ref.dur, ref } : null;
+        }
+
         function calcularEstado(devId, evs) {
             const info = GTB_STATUSINFO[devId] || null;
             const ahora = Date.now();
@@ -672,17 +716,19 @@
                     // Rumbo: si la última visita válida fue Carga va a descargar, y viceversa.
                     // Otra geocerca (control, sin resolver o mixta sin memoria): Carreteo genérico.
                     let estado = "Carreteo";
-                    if (ultimaVisita && ultimaVisita.enter.rol === "ENTER" && zonaOrigen !== undefined) {
-                        let tipo = zonaOrigen ? zonaOrigen.etiqueta : TIPO_DEFECTO;
-                        if (tipo === "Carga/Descarga") {
-                            const t = inferirMixta(visitas.filter(v => v.exit.af <= ultimaVisita.enter.af));
-                            if (t) tipo = t;
-                        }
+                    let eta = null;
+                    if (ultimaVisita) {
+                        const tipo = tipoOperativo(ultimaVisita, visitas);
                         if (tipo === "Carga") estado = "Camino a Descargar";
                         else if (tipo === "Descarga") estado = "Camino a Cargar";
+                        if (tipo === "Carga" || tipo === "Descarga") {
+                            eta = estimarEta(validas, visitas, tipo, zonaOrigen, origen.af);
+                        }
                     }
+                    const fuera = (ahora - origen.af) > CARRETEO_MAX_HORAS * 3600e3;
                     return Object.assign(base, {
-                        estado: (ahora - origen.af) > CARRETEO_MAX_HORAS * 3600e3 ? "Fuera de circuito" : estado,
+                        estado: fuera ? "Fuera de circuito" : estado,
+                        eta: fuera ? null : eta,
                         desde: origen.af,
                         km: Math.round(km * 100) / 100,
                         zona: zonaOrigen ? `desde ${zonaOrigen.name}` : null
@@ -733,6 +779,37 @@
 
             const etiquetaEstado = v => v.estado + (v.inferido ? '?' : '');
 
+            function formatHoraCorta(ms) {
+                return new Intl.DateTimeFormat('es-AR', {
+                    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires'
+                }).format(new Date(ms));
+            }
+
+            // Tiempo como cuenta regresiva: 01:30hs (minutos redondeados hacia arriba)
+            function formatHHMM(ms) {
+                const min = Math.max(0, Math.ceil(ms / 60000));
+                return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}hs`;
+            }
+
+            // ETA de un "Camino a ...": tiempo que falta para llegar. Se recalcula en cada render
+            // (cada 30 s), así que baja a medida que pasa el tiempo. Pasada la llegada estimada
+            // muestra el atraso: ETA +00:20hs.
+            function etaInfo(v) {
+                if (!v.eta) return null;
+                const resta = v.eta.llegada - Date.now();
+                const r = v.eta.ref;
+                const atrasado = resta < 0;
+                const tiempo = (atrasado ? '+' : '') + formatHHMM(Math.abs(resta));
+                return {
+                    hora: formatHoraCorta(v.eta.llegada),
+                    atrasado,
+                    tiempo,
+                    corto: `ETA ${tiempo}`,
+                    base: `Estimado con su último carreteo en este sentido: ${formatDuracion(r.dur)}`
+                        + (r.desde || r.hasta ? ` (${r.desde || '?'} → ${r.hasta || '?'}, salió ${formatHora(r.salida)})` : '')
+                };
+            }
+
             // Íconos de línea (stroke en currentColor) en lugar de emojis
             const svgIco = d => `<svg class="mon-ico" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
             const ICO = {
@@ -772,6 +849,7 @@
                     if (!device) return;
                     if (GRUPOS_AFECTADOS.length && !device.groups.some(g => GRUPOS_AFECTADOS.includes(g))) return;
                     if (FILTRO_GRUPOS && !device.groups.some(g => FILTRO_GRUPOS.has(g))) return;
+                    if (FILTRO_ACTIVOS && !FILTRO_ACTIVOS.has(devId)) return;
                     const evs = porDevice[devId];
                     const estado = calcularEstado(devId, evs);
                     const info = GTB_STATUSINFO[devId] || null;
@@ -800,7 +878,10 @@
 
             // Parte que se suma al tooltip nativo (el nombre del vehículo ya lo muestra Geotab)
             function tooltipDe(v) {
-                const sec = [`En el tramo: ${formatDuracion(Date.now() - v.desde)} · desde ${formatHora(v.desde)}`];
+                const e = etaInfo(v);
+                const sec = [e
+                    ? `ETA ${e.tiempo}${e.atrasado ? ' (atrasado)' : ''} · llegada estimada ${e.hora} · salió ${formatHora(v.desde)}`
+                    : `En el tramo: ${formatDuracion(Date.now() - v.desde)} · desde ${formatHora(v.desde)}`];
                 if (v.zona) sec.push(v.zona);
                 if (v.espera) sec.push(`Espera: ${formatDuracion(v.espera.hasta - v.espera.desde)}`);
                 if (v.km != null) sec.push(`${v.km} km`);
@@ -840,7 +921,7 @@
                     const v = data && data.device ? vehiculoPorId(data.device.id) : null;
                     if (!v) return [];
                     return [{
-                        title: `Cesetti: ${etiquetaEstado(v)} · ${formatDuracion(Date.now() - v.desde)}`,
+                        title: `Cesetti: ${etiquetaEstado(v)} · ${v.eta ? etaInfo(v).corto : formatDuracion(Date.now() - v.desde)}`,
                         clickEvent: EVENTO_MENU,
                         data: { id: v.id }
                     }];
@@ -867,6 +948,7 @@
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
                     dibujarEtiquetas();
+                    mapa_aplicarPronto();
                     row = elt.querySelector(`.mon-row[data-id="${CSS.escape(id)}"]`);
                 }
                 if (!row) return;
@@ -932,6 +1014,7 @@
             const ETQ_STORAGE_KEY = "monitorSupe.etiquetas";
             const ETQ_FONT = "600 11px 'Segoe UI', Roboto, Arial, sans-serif";
             const ETQ_ALTO = 20;
+            const ETQ_SESGO = 6;            // inclinación de los lados del paralelogramo
             const ETQ_SEPARACION = 16;      // desde el centro del vehículo hasta el recuadro
             let etiquetasVisibles = true;
             try { etiquetasVisibles = localStorage.getItem(ETQ_STORAGE_KEY) !== "0"; } catch (e) { /* sin storage */ }
@@ -956,17 +1039,21 @@
                 const key = `${color}|${texto}`;
                 if (etq_cache[key]) return etq_cache[key];
                 if (Object.keys(etq_cache).length > 2000) etq_cache = {};   // las duraciones cambian: se recicla
-                const ancho = etq_anchoTexto(texto) + 18;
+                // Paralelogramo del mismo alto y ancho que el recuadro: los lados se inclinan ETQ_SESGO px.
+                // El letter-spacing (0.3 px por carácter) no lo mide measureText: se suma aparte.
+                const ancho = Math.ceil(etq_anchoTexto(texto) + texto.length * 0.3) + 18;
+                const s = ETQ_SESGO, a = ETQ_ALTO - 0.5;
                 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${ancho}" height="${ETQ_ALTO}" viewBox="0 0 ${ancho} ${ETQ_ALTO}">` +
-                    `<rect x="0.5" y="0.5" width="${ancho - 1}" height="${ETQ_ALTO - 1}" rx="1" ry="1" fill="#ffffff" stroke="${color}" stroke-width="1"/>` +
-                    `<rect x="0.5" y="0.5" width="3" height="${ETQ_ALTO - 1}" fill="${color}"/>` +
-                    `<text x="10" y="${ETQ_ALTO / 2 + 4}" font-family="Roboto, 'Segoe UI', Arial, sans-serif" font-size="11" font-weight="600" letter-spacing="0.3" fill="#0f1a2b">${esc(texto)}</text>` +
+                    `<polygon points="${s + 0.5},0.5 ${ancho - 0.5},0.5 ${ancho - s - 0.5},${a} 0.5,${a}" fill="#ffffff" stroke="${color}" stroke-width="1" stroke-linejoin="miter"/>` +
+                    `<polygon points="${s + 0.5},0.5 ${s + 4.5},0.5 4.5,${a} 0.5,${a}" fill="${color}"/>` +
+                    `<text x="11" y="${ETQ_ALTO / 2 + 4}" font-family="Roboto, 'Segoe UI', Arial, sans-serif" font-size="11" font-weight="600" letter-spacing="0.3" fill="#0f1a2b">${esc(texto)}</text>` +
                     `</svg>`;
                 etq_cache[key] = { uri: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), ancho };
                 return etq_cache[key];
             }
 
-            const etq_texto = v => etiquetaEstado(v) + (v.desde ? ` · ${formatDuracion(Date.now() - v.desde)}` : '');
+            const etq_texto = v => etiquetaEstado(v) + (v.eta ? ` · ${etaInfo(v).corto}`
+                : (v.desde ? ` · ${formatDuracion(Date.now() - v.desde)}` : ''));
 
             // Redibujar markers en medio de un setBounds o un arrastre hace que MyGeotab vuelva
             // a la vista anterior: mientras el mapa se mueve, el redibujo queda pendiente.
@@ -1119,7 +1206,15 @@
                         const mono = s => `<span class="mon-mono">${s}</span>`;
                         if (v.zona) par('Geocerca', esc(v.zona));
                         if (v.espera) par('Espera', `${mono(formatDuracion(v.espera.hasta - v.espera.desde))} <span class="mon-mute">${mono(formatHora(v.espera.desde))}</span>`);
-                        par('En el tramo', `${mono(dur)} <span class="mon-mute">desde ${mono(formatHora(v.desde))}</span>`);
+                        const e = etaInfo(v);
+                        if (e) {
+                            par('ETA', `<span title="${esc(e.base)}">`
+                                + (e.atrasado ? `<span class="mon-atrasado">${mono(e.tiempo)} atrasado</span>` : `<b class="mon-eta">${mono(e.tiempo)}</b>`)
+                                + ` <span class="mon-mute">llegada ~${mono(e.hora)}</span></span>`);
+                            par('Salida', mono(formatHora(v.desde)));
+                        } else {
+                            par('En el tramo', `${mono(dur)} <span class="mon-mute">desde ${mono(formatHora(v.desde))}</span>`);
+                        }
                         if (v.km != null) par('Recorrido', mono(`${v.km} km`));
                         par('Conductor', esc(nombreConductor(v.driverId)));
                         par('Velocidad', `${mono(`${v.speed} km/h`)} <span class="mon-mute">· ${mono(formatHora(v.lastData))}</span>`);
@@ -1491,6 +1586,133 @@
                 }
             }
 
+            // ─────────────────────────────────────────────────────────────────
+            //  FILTRO BIDIRECCIONAL CON EL MAPA (vehículos visibles)
+            // ─────────────────────────────────────────────────────────────────
+            // La selección de vehículos del mapa vive en el estado de la página (page.get/set,
+            // clave liveVehicleIds, la misma que aparece en la URL del mapa).
+            //   Add-in -> mapa: con un filtro de tramo o una búsqueda activos, el mapa muestra
+            //     solo esas unidades; al volver a "Todos" se restaura la selección del usuario.
+            //   Mapa -> add-in: si el usuario elige activos en el mapa, el add-in se limita a esos.
+            // Lo que pone el add-in vuelve como stateChange: se reconoce por su firma y se ignora.
+            const MAPA_CLAVE = "liveVehicleIds";
+            const SYNC_STORAGE_KEY = "monitorSupe.syncMapa";
+            let syncMapa = true;
+            try { syncMapa = localStorage.getItem(SYNC_STORAGE_KEY) !== "0"; } catch (e) { /* sin storage */ }
+            let mapa_original;              // selección del usuario antes de filtrar (undefined = el add-in no tocó el mapa)
+            let mapa_firmaPropia = null;    // firma de lo último que puso el add-in
+            let mapa_errorLogueado = false;
+
+            // Ids de la selección del mapa: null = todos (sin selección o "all")
+            function mapa_ids(valor) {
+                if (valor == null || valor === '') return null;
+                if (typeof valor === 'string') {
+                    if (/^all$/i.test(valor.trim())) return null;
+                    return valor.match(/b[0-9A-Za-z]+/g) || [];
+                }
+                const ids = filtro_extraerIds(valor);
+                return Array.isArray(valor) || ids.length ? ids : null;
+            }
+            const mapa_firma = ids => ids == null ? 'ALL' : ids.slice().sort().join(',');
+
+            // Selección del usuario en el mapa -> filtro del add-in
+            function mapa_adoptarSeleccion(valor) {
+                const ids = mapa_ids(valor);
+                FILTRO_ACTIVOS = ids ? new Set(ids) : null;
+                FILTRO_ACTIVOS_N = ids ? ids.length : 0;
+            }
+
+            async function mapa_set(valor, firma) {
+                mapa_firmaPropia = firma;
+                try {
+                    await service.page.set(MAPA_CLAVE, valor);
+                } catch (err) {
+                    if (!mapa_errorLogueado) console.error("[MAPA] No se pudo filtrar los vehículos del mapa:", err);
+                    mapa_errorLogueado = true;
+                }
+            }
+
+            // Vuelve a la selección que tenía el usuario antes de que el add-in filtrara
+            async function mapa_restaurar() {
+                if (mapa_original === undefined) return;
+                const orig = mapa_original;
+                mapa_original = undefined;
+                await mapa_set(orig == null ? "all" : orig, mapa_firma(mapa_ids(orig)));
+            }
+
+            // Add-in -> mapa. Se llama en cada render: solo escribe si cambió el conjunto de unidades.
+            async function mapa_aplicar() {
+                if (!service.page || typeof service.page.set !== 'function') return;
+                const filtrando = syncMapa && service.page.active !== false
+                    && (currentFilter !== 'all' || currentSearch.trim() !== '');
+                if (!filtrando) return mapa_restaurar();
+                const ids = filtrar(vehiculos).map(v => v.id);
+                const firma = mapa_firma(ids);
+                if (mapa_original !== undefined && firma === mapa_firmaPropia) return;
+                if (mapa_original === undefined) {
+                    try {
+                        const st = await service.page.get();
+                        mapa_original = st && st[MAPA_CLAVE] !== undefined ? st[MAPA_CLAVE] : null;
+                    } catch (err) {
+                        mapa_original = null;
+                    }
+                }
+                await mapa_set(ids, firma);
+            }
+
+            // Mapa -> add-in: cambios de la selección de vehículos hechos por el usuario
+            function mapa_alCambiarEstado(data) {
+                const st = data && data.state !== undefined ? data.state : data;
+                if (!st || st[MAPA_CLAVE] === undefined) return;
+                const valor = st[MAPA_CLAVE];
+                if (mapa_firma(mapa_ids(valor)) === mapa_firmaPropia) return;   // eco de lo que puso el add-in
+                // El usuario cambió la selección en el mapa: manda el mapa. El add-in deja su
+                // filtro de tramo para no pisarla y pasa a mostrar las unidades elegidas.
+                dbg("[MAPA] Selección del usuario:", valor);
+                mapa_firmaPropia = null;
+                mapa_original = undefined;
+                mapa_adoptarSeleccion(valor);
+                if (currentFilter !== 'all' || currentSearch) {
+                    currentFilter = 'all';
+                    currentSearch = '';
+                    elt.querySelector("#mon-search").value = '';
+                    elt.querySelectorAll("[data-filter]").forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+                }
+                lista_animarEntrada = true;
+                renderAll();
+            }
+
+            async function mapa_iniciar() {
+                try {
+                    const st = await service.page.get();
+                    initLog("[MAPA] Estado de la página:", st);
+                    if (st && st[MAPA_CLAVE] !== undefined) mapa_adoptarSeleccion(st[MAPA_CLAVE]);
+                } catch (err) {
+                    console.error("[MAPA] No se pudo leer el estado de la página:", err);
+                }
+                try {
+                    service.page.attach("stateChange", mapa_alCambiarEstado);
+                    // Al pasar a otra pestaña de add-in se devuelve el mapa como estaba; al volver, se reaplica
+                    service.page.attach("blur", () => { mapa_restaurar(); });
+                    service.page.attach("focus", () => { mapa_aplicar(); });
+                } catch (err) {
+                    console.error("[MAPA] No se pudo escuchar el estado de la página:", err);
+                }
+            }
+
+            // Desde la UI (tipeo en la búsqueda, clicks seguidos en filtros): una sola escritura al final
+            let mapa_timer = null;
+            function mapa_aplicarPronto() {
+                clearTimeout(mapa_timer);
+                mapa_timer = setTimeout(mapa_aplicar, 350);
+            }
+
+            function toggleSyncMapa(on) {
+                syncMapa = on;
+                try { localStorage.setItem(SYNC_STORAGE_KEY, on ? "1" : "0"); } catch (e) { /* sin storage */ }
+                mapa_aplicar();
+            }
+
             async function renderAll() {
                 const statusEl = elt.querySelector("#mon-status");
                 try {
@@ -1500,8 +1722,12 @@
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
                     dibujarEtiquetas();
+                    mapa_aplicar();
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
-                    const filtro = FILTRO_GRUPOS ? ` (filtro: ${FILTRO_GRUPOS_N} grupo${FILTRO_GRUPOS_N === 1 ? '' : 's'})` : '';
+                    const partes = [];
+                    if (FILTRO_GRUPOS) partes.push(`${FILTRO_GRUPOS_N} grupo${FILTRO_GRUPOS_N === 1 ? '' : 's'}`);
+                    if (FILTRO_ACTIVOS) partes.push(`${FILTRO_ACTIVOS_N} activo${FILTRO_ACTIVOS_N === 1 ? '' : 's'} del mapa`);
+                    const filtro = partes.length ? ` (filtro: ${partes.join(' · ')})` : '';
                     statusEl.textContent = `${vehiculos.length} vehículos afectados${filtro} · actualizado ${timeStr}`;
                     if (dashVisible) await renderDashboard();
                     statusEl.classList.remove("mon-error");
@@ -1556,6 +1782,7 @@
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
                     dibujarEtiquetas();
+                    mapa_aplicarPronto();
                 });
                 elt.querySelectorAll("[data-filter]").forEach(btn => {
                     btn.addEventListener('click', () => {
@@ -1565,11 +1792,15 @@
                         lista_animarEntrada = true;
                         renderLista(vehiculos);
                         dibujarEtiquetas();
+                        mapa_aplicarPronto();
                     });
                 });
                 const etqToggle = elt.querySelector("#mon-etq-toggle");
                 etqToggle.checked = etiquetasVisibles;
                 etqToggle.addEventListener('change', () => toggleEtiquetas(etqToggle.checked));
+                const syncToggle = elt.querySelector("#mon-sync-toggle");
+                syncToggle.checked = syncMapa;
+                syncToggle.addEventListener('change', () => toggleSyncMapa(syncToggle.checked));
                 document.addEventListener('keydown', e => {
                     if (e.key === 'Escape' && seleccionId) seleccionar({ id: seleccionId });
                 });
@@ -1630,6 +1861,7 @@
                 #mon-root .mon-feed-down { --c:var(--crit); color:var(--crit); }
                 #mon-root .mon-feed-off  { --c:var(--line-2); color:var(--text-mute); }
                 #mon-root .mon-feed-ok i::after, #mon-root .mon-feed-down i::after { content:''; position:absolute; inset:0; background:inherit; animation:mon-ping 1.6s var(--ease) infinite; }
+                #mon-root .mon-toggles { display:flex; gap:14px; flex-wrap:wrap; }
                 #mon-root .mon-switch { display:inline-flex; align-items:center; gap:7px; font:600 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--text-mute); cursor:pointer; user-select:none; }
                 #mon-root .mon-switch input { display:none; }
                 #mon-root .mon-switch-track { position:relative; width:30px; height:14px; border:1px solid var(--line-2); background:var(--surface-2); transition:border-color .18s, background .18s; }
@@ -1686,6 +1918,8 @@
                 #mon-root .mon-kv dd { margin:0; color:var(--text); min-width:0; overflow-wrap:anywhere; }
                 #mon-root .mon-mono { font-family:var(--mono); font-size:11.5px; font-variant-numeric:tabular-nums; }
                 #mon-root .mon-mute { color:var(--text-mute); }
+                #mon-root .mon-atrasado { color:var(--warn); font-weight:600; }
+                #mon-root .mon-eta { color:var(--neon); font-weight:600; }
 
                 /* Modo dashboard */
                 #mon-root #mon-dash { display:none; flex:1; min-height:0; overflow-y:auto; padding:12px 16px 16px; }
@@ -1771,9 +2005,14 @@
                       </div>
                       <div class="mon-subbar">
                         <div id="mon-feeds"><span class="mon-feed mon-feed-off"><i></i>Feeds: consultando...</span></div>
+                        <div class="mon-toggles">
                         <label class="mon-switch" title="Mostrar el estado de cada unidad junto a su ícono en el mapa">
-                          <input type="checkbox" id="mon-etq-toggle"><span class="mon-switch-track"></span>Etiquetas
+                          <input type="checkbox" id="mon-etq-toggle"><span class="mon-switch-track"></span>Etiquetas en mapa
                         </label>
+                        <label class="mon-switch" title="Al filtrar por tramo o buscar, mostrar en el mapa solo esas unidades">
+                          <input type="checkbox" id="mon-sync-toggle"><span class="mon-switch-track"></span>Filtrar mapa
+                        </label>
+                        </div>
                       </div>
                       <input type="text" id="mon-search" placeholder="Buscar por nombre, patente o geocerca...">
                       <div class="mon-filters">
@@ -1827,6 +2066,8 @@
                     } catch (err) {
                         console.error("[FILTRO] No se pudo escuchar filterChange:", err);
                     }
+
+                    await mapa_iniciar();
 
                     statusEl.textContent = `Cargando eventos (${LOOKBACK_HORAS} h)...`;
                     await ev_refreshData();
