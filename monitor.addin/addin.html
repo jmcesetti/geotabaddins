@@ -29,8 +29,12 @@
         ev_pipeline      ExceptionEvent de las reglas SUPE: carga completa de LOOKBACK_HORAS
                          (cada 30 min) + incremental de los últimos 30 min (cada 60s)
         zona_pipeline    zona de cada ENTER: LogRecord del ingreso + punto en polígono
-        render_pipeline  estado por device -> panel (cada 30s); en el mapa no se dibuja nada:
-                         el tramo se suma al tooltip y al menú de los vehículos nativos
+        render_pipeline  estado por device -> panel (cada 30s); el tramo se suma al tooltip y al
+                         menú de los vehículos nativos, y opcionalmente una etiqueta junto a cada uno
+        feeds            status.json del gist (cada 60s): estado de los feeds Geotab y SUPE
+
+        Carreteo con rumbo: última visita válida Carga -> "Camino a Descargar", Descarga ->
+        "Camino a Cargar" (mixta: por alternancia, sin "?"); otra geocerca -> "Carreteo"
 
     "Vehículos afectados" = devices con al menos un evento SUPE en la ventana de
     LOOKBACK_HORAS (opcionalmente restringido a GRUPOS_AFECTADOS).
@@ -96,6 +100,13 @@
         // Restringir los afectados a estos grupos (ids). Vacío = todos los que tengan eventos SUPE.
         const GRUPOS_AFECTADOS      = [];
 
+        // Estado de los feeds (heartbeat que publica el servicio en el gist)
+        const FEEDS_STATUS_URL      = "https://gist.githubusercontent.com/jmcesetti/a888c45bc56d139664557d1775df8f61/raw/status.json";
+        const FEEDS                 = [{ key: "geotab", label: "Geotab" }, { key: "supe", label: "SUPE" }];
+        const FEED_RETRASO_MIN      = 10;     // sin consultar (last_poll) desde hace más de esto -> Con retraso
+        const FEED_CAIDO_MIN        = 20;     // sin consultar (last_poll) desde hace más de esto -> Servicio caído
+        const FEEDS_REFRESH_SEG     = 60;
+
         // Usuarios de MyGeotab habilitados a ver el monitor (en minúsculas)
         const LISTA_BLANCA = [
             "jm@cesetti.com.ar",
@@ -113,6 +124,8 @@
             "Carga":                { color: "#1d4ed8", cat: "carga" },
             "Descarga":             { color: "#0ea5e9", cat: "descarga" },
             "Carga/Descarga":       { color: "#ec4899", cat: "mixta" },
+            "Camino a Cargar":      { color: "#65a30d", cat: "carreteo" },
+            "Camino a Descargar":   { color: "#059669", cat: "carreteo" },
             "Carreteo":             { color: "#16a34a", cat: "carreteo" },
             "Demora":               { color: "#f59e0b", cat: "demora" },
             "StandBy":              { color: "#dc2626", cat: "standby" },
@@ -652,8 +665,21 @@
                     const km = exits.filter(e => e.af >= origen.af).reduce((s, e) => s + e.km, 0);
                     const ultimaVisita = validas[validas.length - 1];
                     const zonaOrigen = ultimaVisita ? zonaDeEnter(ultimaVisita.enter) : null;
+
+                    // Rumbo: si la última visita válida fue Carga va a descargar, y viceversa.
+                    // Otra geocerca (control, sin resolver o mixta sin memoria): Carreteo genérico.
+                    let estado = "Carreteo";
+                    if (ultimaVisita && ultimaVisita.enter.rol === "ENTER" && zonaOrigen !== undefined) {
+                        let tipo = zonaOrigen ? zonaOrigen.etiqueta : TIPO_DEFECTO;
+                        if (tipo === "Carga/Descarga") {
+                            const t = inferirMixta(visitas.filter(v => v.exit.af <= ultimaVisita.enter.af));
+                            if (t) tipo = t;
+                        }
+                        if (tipo === "Carga") estado = "Camino a Descargar";
+                        else if (tipo === "Descarga") estado = "Camino a Cargar";
+                    }
                     return Object.assign(base, {
-                        estado: (ahora - origen.af) > CARRETEO_MAX_HORAS * 3600e3 ? "Fuera de circuito" : "Carreteo",
+                        estado: (ahora - origen.af) > CARRETEO_MAX_HORAS * 3600e3 ? "Fuera de circuito" : estado,
                         desde: origen.af,
                         km: Math.round(km * 100) / 100,
                         zona: zonaOrigen ? `desde ${zonaOrigen.name}` : null
@@ -703,6 +729,25 @@
             }
 
             const etiquetaEstado = v => v.estado + (v.inferido ? '?' : '');
+
+            // Íconos de línea (stroke en currentColor) en lugar de emojis
+            const svgIco = d => `<svg class="mon-ico" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+            const ICO = {
+                dash:    svgIco('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
+                list:    svgIco('<path d="M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1"/>'),
+                refresh: svgIco('<path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/>'),
+                ok:      svgIco('<path d="M4 12.5l5 5L20 6.5"/>'),
+                err:     svgIco('<path d="M6 6l12 12M18 6L6 18"/>')
+            };
+            const btnHtml = (ico, texto) => `${ico}<span>${texto}</span>`;
+
+            // Indicador de carga: barra fina arriba del panel y estado del pie en azul
+            const setCargando = on => { const r = elt.querySelector("#mon-root"); if (r) r.classList.toggle('mon-cargando', on); };
+
+            // Animaciones de la lista: entrada escalonada solo en la primera carga y al cambiar
+            // filtro o búsqueda; en los refrescos periódicos solo destella lo que cambió de estado.
+            let lista_animarEntrada = true;
+            const lista_estadoPrevio = {};
 
             // Eventos agrupados por device, ordenados por activeFrom
             function eventosPorDevice() {
@@ -818,6 +863,7 @@
                     elt.querySelectorAll("[data-filter]").forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
+                    dibujarEtiquetas();
                     row = elt.querySelector(`.mon-row[data-id="${CSS.escape(id)}"]`);
                 }
                 if (!row) return;
@@ -863,6 +909,7 @@
 
             async function centrar(v) {
                 try {
+                    etq_pausar(2500);
                     const pad = 0.01;
                     await service.map.setBounds({
                         sw: { lat: v.lat - pad, lng: v.lon - pad },
@@ -870,6 +917,149 @@
                     });
                 } catch (e) {
                     console.error("[MAP] Error al centrar:", e);
+                }
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            //  ETIQUETAS EN EL MAPA — estado actual junto a cada vehículo nativo
+            // ─────────────────────────────────────────────────────────────────
+            // Un marker SVG por unidad, anclado a la derecha del ícono nativo (dx = separación).
+            // Siguen al filtro y a la búsqueda del panel. La API no permite mover un marker:
+            // en cada redibujo se dibujan los nuevos y después se borran los viejos.
+            const ETQ_STORAGE_KEY = "monitorSupe.etiquetas";
+            const ETQ_FONT = "600 11px 'Segoe UI', Roboto, Arial, sans-serif";
+            const ETQ_ALTO = 20;
+            const ETQ_SEPARACION = 16;      // desde el centro del vehículo hasta el recuadro
+            let etiquetasVisibles = true;
+            try { etiquetasVisibles = localStorage.getItem(ETQ_STORAGE_KEY) !== "0"; } catch (e) { /* sin storage */ }
+            let etq_items = [];
+            let etq_ctx = null;
+            let etq_cache = {};
+            let etq_pausaHasta = 0;
+            let etq_pendiente = false;
+            let etq_timer = null;
+
+            function etq_anchoTexto(texto) {
+                try {
+                    if (!etq_ctx) etq_ctx = document.createElement('canvas').getContext('2d');
+                    etq_ctx.font = ETQ_FONT;
+                    return Math.ceil(etq_ctx.measureText(texto).width);
+                } catch (e) {
+                    return Math.ceil(texto.length * 6.5);
+                }
+            }
+
+            function etq_svg(texto, color) {
+                const key = `${color}|${texto}`;
+                if (etq_cache[key]) return etq_cache[key];
+                if (Object.keys(etq_cache).length > 2000) etq_cache = {};   // las duraciones cambian: se recicla
+                const ancho = etq_anchoTexto(texto) + 18;
+                const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${ancho}" height="${ETQ_ALTO}" viewBox="0 0 ${ancho} ${ETQ_ALTO}">` +
+                    `<rect x="0.5" y="0.5" width="${ancho - 1}" height="${ETQ_ALTO - 1}" rx="1" ry="1" fill="#ffffff" stroke="${color}" stroke-width="1"/>` +
+                    `<rect x="0.5" y="0.5" width="3" height="${ETQ_ALTO - 1}" fill="${color}"/>` +
+                    `<text x="10" y="${ETQ_ALTO / 2 + 4}" font-family="Roboto, 'Segoe UI', Arial, sans-serif" font-size="11" font-weight="600" letter-spacing="0.3" fill="#0f1a2b">${esc(texto)}</text>` +
+                    `</svg>`;
+                etq_cache[key] = { uri: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), ancho };
+                return etq_cache[key];
+            }
+
+            const etq_texto = v => etiquetaEstado(v) + (v.desde ? ` · ${formatDuracion(Date.now() - v.desde)}` : '');
+
+            // Redibujar markers en medio de un setBounds o un arrastre hace que MyGeotab vuelva
+            // a la vista anterior: mientras el mapa se mueve, el redibujo queda pendiente.
+            function etq_pausar(ms) {
+                etq_pausaHasta = Math.max(etq_pausaHasta, Date.now() + ms);
+                clearTimeout(etq_timer);
+                etq_timer = setTimeout(() => { if (etq_pendiente) dibujarEtiquetas(); }, etq_pausaHasta - Date.now() + 50);
+            }
+            try {
+                service.map.attach("change", () => etq_pausar(1000));
+                service.map.attach("changed", () => etq_pausar(500));
+            } catch (err) {
+                dbg("[MAP] No se pudo escuchar los cambios de vista:", err);
+            }
+
+            function dibujarEtiquetas() {
+                if (Date.now() < etq_pausaHasta) { etq_pendiente = true; return; }
+                etq_pendiente = false;
+                const nuevos = [];
+                if (etiquetasVisibles) {
+                    filtrar(vehiculos).forEach(v => {
+                        if (!v.lat || !v.lon) return;
+                        try {
+                            const cfg = ESTADOS[v.estado] || ESTADOS["Sin clasificar"];
+                            const m = etq_svg(etq_texto(v), cfg.color);
+                            const marker = service.canvas.marker({ lat: v.lat, lng: v.lon }, m.ancho, ETQ_ALTO, m.uri, 9)
+                                .change({ "dx": ETQ_SEPARACION, "dy": -ETQ_ALTO / 2 });
+                            marker
+                                .attach("over", coords => {
+                                    const actual = vehiculoPorId(v.id) || v;
+                                    const t = tooltipDe(actual);
+                                    service.tooltip.showAt(coords, { main: `${actual.name} · ${t.main}`, secondary: t.secondary }, 1);
+                                })
+                                .attach("out", () => service.tooltip.hide())
+                                .attach("click", () => resaltarFila(v.id));
+                            nuevos.push(marker);
+                        } catch (err) {
+                            console.error("[MAP] No se pudo dibujar la etiqueta:", err);
+                        }
+                    });
+                }
+                // Primero lo nuevo y después se borra lo viejo: evita el parpadeo
+                etq_items.forEach(item => { try { item.remove(); } catch (e) { /* ya no existe */ } });
+                etq_items = nuevos;
+            }
+
+            function toggleEtiquetas(visible) {
+                etiquetasVisibles = visible;
+                try { localStorage.setItem(ETQ_STORAGE_KEY, visible ? "1" : "0"); } catch (e) { /* sin storage */ }
+                etq_pausaHasta = 0;
+                dibujarEtiquetas();
+            }
+
+            // ─────────────────────────────────────────────────────────────────
+            //  ESTADO DE LOS FEEDS — status.json del gist
+            // ─────────────────────────────────────────────────────────────────
+            let feeds_refreshIntervalId = null;
+
+            function feeds_clasificar(fuente, servicio) {
+                if (!fuente) return { cls: 'off', texto: 'Sin información' };
+                if (fuente.enabled === false) return { cls: 'off', texto: 'Deshabilitado' };
+                // Se mide por la última consulta: una fuente puede pasar ratos sin datos nuevos
+                // y seguir sana. Las que no informan last_poll (SUPE) se miden por last_data.
+                const ultimo = Date.parse(fuente.last_poll || fuente.last_data);
+                const edadMin = isNaN(ultimo) ? Infinity : (Date.now() - ultimo) / 60000;
+                if (servicio.status !== 'online' || fuente.running === false || edadMin > FEED_CAIDO_MIN) {
+                    return { cls: 'down', texto: 'Servicio caído', edadMin };
+                }
+                if (edadMin > FEED_RETRASO_MIN) return { cls: 'warn', texto: `Con retraso (${formatDuracion(edadMin * 60000)})`, edadMin };
+                return { cls: 'ok', texto: 'Comunicando', edadMin };
+            }
+
+            async function feeds_refresh() {
+                const cont = elt.querySelector("#mon-feeds");
+                if (!cont) return;
+                try {
+                    const resp = await fetch(`${FEEDS_STATUS_URL}?t=${Date.now()}`, { cache: 'no-store' });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const st = await resp.json();
+                    const fuentes = st.sources || {};
+                    const errores = st.errors || {};
+                    cont.innerHTML = FEEDS.map(f => {
+                        const src = fuentes[f.key];
+                        const c = feeds_clasificar(src, st);
+                        const det = [
+                            `${f.label}: ${c.texto}`,
+                            src && src.last_data ? `Último dato: ${formatHora(Date.parse(src.last_data))}` : null,
+                            src && src.last_poll ? `Última consulta: ${formatHora(Date.parse(src.last_poll))}` : null,
+                            st.last_heartbeat ? `Heartbeat del servicio: ${formatHora(Date.parse(st.last_heartbeat))}` : null,
+                            errores[f.key] != null ? `Errores: ${errores[f.key]}` : null
+                        ].filter(Boolean).join('\n');
+                        return `<span class="mon-feed mon-feed-${c.cls}" title="${esc(det)}"><i></i>${esc(f.label)}: ${esc(c.texto)}</span>`;
+                    }).join('');
+                } catch (err) {
+                    console.error("[FEEDS]", err);
+                    cont.innerHTML = `<span class="mon-feed mon-feed-off" title="${esc(err.message)}"><i></i>Feeds: sin información</span>`;
                 }
             }
 
@@ -884,6 +1074,9 @@
                 }
 
                 // Agrupado por estado, en el orden de ESTADOS
+                const animar = lista_animarEntrada;
+                lista_animarEntrada = false;
+                let i = 0;
                 Object.keys(ESTADOS).forEach(estado => {
                     const grupo = filtrados.filter(v => v.estado === estado);
                     if (grupo.length === 0) return;
@@ -891,8 +1084,8 @@
 
                     const title = document.createElement('div');
                     title.className = 'mon-group';
-                    title.style.borderLeftColor = cfg.color;
-                    title.textContent = `${estado} (${grupo.length})`;
+                    title.style.setProperty('--c', cfg.color);
+                    title.innerHTML = `<span>${esc(estado)}</span><b>${grupo.length}</b>`;
                     container.appendChild(title);
 
                     // Los que llevan más tiempo en el tramo, primero
@@ -901,22 +1094,32 @@
                         row.className = 'mon-row' + (v.lat && v.lon ? '' : ' mon-row-disabled')
                             + (v.id === seleccionId ? ' mon-row-selected' : '');
                         row.dataset.id = v.id;
+                        row.style.setProperty('--c', cfg.color);
+                        if (animar) {
+                            row.classList.add('mon-row-enter');
+                            row.style.setProperty('--i', Math.min(i++, 10));
+                        } else if (lista_estadoPrevio[v.id] && lista_estadoPrevio[v.id] !== v.estado) {
+                            row.classList.add('mon-changed');
+                        }
+                        lista_estadoPrevio[v.id] = v.estado;
                         const dur = v.desde ? formatDuracion(Date.now() - v.desde) : '-';
 
                         const badges = [
-                            `<span class="mon-badge" style="background:${cfg.color}1f; color:${cfg.color};">${esc(etiquetaEstado(v))}</span>`
+                            `<span class="mon-tag mon-tag-estado" style="--c:${cfg.color};">${esc(etiquetaEstado(v))}</span>`
                         ];
-                        if (v.provisional) badges.push('<span class="mon-badge mon-b-warn" title="Menos de 20 min adentro: puede ser un paso por la geocerca">Validando</span>');
-                        if (v.inferido) badges.push('<span class="mon-badge mon-b-info" title="Zona mixta: tipo inferido por alternancia">Inferido</span>');
-                        if (v.communicates === false) badges.push('<span class="mon-badge mon-b-off">GO sin comunicar</span>');
+                        if (v.provisional) badges.push('<span class="mon-tag mon-tag-warn" title="Menos de 20 min adentro: puede ser un paso por la geocerca">Validando</span>');
+                        if (v.inferido) badges.push('<span class="mon-tag mon-tag-info" title="Zona mixta: tipo inferido por alternancia">Inferido</span>');
+                        if (v.communicates === false) badges.push('<span class="mon-tag mon-tag-off">GO sin comunicar</span>');
 
-                        const lineas = [];
-                        if (v.zona) lineas.push(`<strong>Geocerca:</strong> ${esc(v.zona)}`);
-                        if (v.espera) lineas.push(`<strong>Espera ${esc(etiquetaEstado(v))}:</strong> ${formatDuracion(v.espera.hasta - v.espera.desde)} (${formatHora(v.espera.desde)})`);
-                        lineas.push(`<strong>En el tramo:</strong> ${dur} · desde ${formatHora(v.desde)}`);
-                        if (v.km != null) lineas.push(`<strong>Recorrido:</strong> ${v.km} km`);
-                        lineas.push(`<strong>Conductor:</strong> ${esc(nombreConductor(v.driverId))}`);
-                        lineas.push(`<strong>Velocidad:</strong> ${v.speed} km/h · <strong>Último dato:</strong> ${formatHora(v.lastData)}`);
+                        const kv = [];
+                        const par = (k, val) => kv.push(`<dt>${k}</dt><dd>${val}</dd>`);
+                        const mono = s => `<span class="mon-mono">${s}</span>`;
+                        if (v.zona) par('Geocerca', esc(v.zona));
+                        if (v.espera) par('Espera', `${mono(formatDuracion(v.espera.hasta - v.espera.desde))} <span class="mon-mute">${mono(formatHora(v.espera.desde))}</span>`);
+                        par('En el tramo', `${mono(dur)} <span class="mon-mute">desde ${mono(formatHora(v.desde))}</span>`);
+                        if (v.km != null) par('Recorrido', mono(`${v.km} km`));
+                        par('Conductor', esc(nombreConductor(v.driverId)));
+                        par('Velocidad', `${mono(`${v.speed} km/h`)} <span class="mon-mute">· ${mono(formatHora(v.lastData))}</span>`);
 
                         row.innerHTML = `
                             <div class="mon-row-head">
@@ -924,7 +1127,7 @@
                                 <span class="mon-plate">${esc(v.licensePlate)}</span>
                             </div>
                             <div class="mon-badges">${badges.join('')}</div>
-                            <div class="mon-detail">${lineas.join('<br>')}</div>
+                            <dl class="mon-kv">${kv.join('')}</dl>
                         `;
                         if (v.lat && v.lon) row.addEventListener('click', () => seleccionar(v));
                         container.appendChild(row);
@@ -939,6 +1142,44 @@
             // actual, sobre los vehículos dentro del filtro de grupos del mapa.
             let dashVisible = false;
             let dashCalculando = false;
+            // Valores del render anterior (contadores y barras animan desde ahí)
+            let dash_prev = {};
+
+            function dash_contar(el, desde, hasta, ms) {
+                const t0 = performance.now();
+                const ease = x => 1 - Math.pow(1 - x, 3);
+                const fmt = x => Math.round(x).toLocaleString('es-AR');
+                // El timestamp de rAF es el inicio del frame y puede ser anterior a t0: se acota a [0, 1]
+                (function paso(ahora) {
+                    const p = Math.max(0, Math.min(1, (ahora - t0) / ms));
+                    el.textContent = fmt(desde + (hasta - desde) * ease(p));
+                    if (p < 1) requestAnimationFrame(paso);
+                })(t0);
+                // Si la pestaña está en segundo plano rAF no corre: el valor final queda igual
+                setTimeout(() => { el.textContent = fmt(hasta); }, ms + 100);
+            }
+
+            function dash_animar(cont) {
+                const reducido = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                const nuevo = {};
+                cont.querySelectorAll('[data-num]').forEach(el => {
+                    const k = 'n|' + el.dataset.k, hasta = Number(el.dataset.num);
+                    const desde = k in dash_prev ? dash_prev[k] : 0;
+                    nuevo[k] = hasta;
+                    if (!reducido && desde !== hasta) dash_contar(el, desde, hasta, 550);
+                });
+                const fills = [...cont.querySelectorAll('.mon-hbar-fill[data-w]')];
+                fills.forEach(el => {
+                    const k = 'b|' + el.dataset.k;
+                    el.style.width = (k in dash_prev ? dash_prev[k] : 0) + '%';
+                    nuevo[k] = Number(el.dataset.w);
+                });
+                if (fills.length) {
+                    void cont.offsetWidth;   // fuerza el ancho inicial antes de la transición
+                    fills.forEach(el => { el.style.width = el.dataset.w + '%'; });
+                }
+                dash_prev = nuevo;
+            }
             const OFFSET_LOCAL_MS = 3 * 3600e3;   // Argentina, UTC-3 (igual que TZ_LOCAL del feed)
             const inicioDelDia = ms => Math.floor((ms - OFFSET_LOCAL_MS) / 86400e3) * 86400e3 + OFFSET_LOCAL_MS;
             const horaLocal = ms => new Date(ms - OFFSET_LOCAL_MS).getUTCHours();
@@ -1043,7 +1284,7 @@
                 return filas.map(f => `
                     <div class="mon-hbar" title="${esc(f.title || f.label)}">
                         <span class="mon-hbar-label">${esc(f.label)}</span>
-                        <span class="mon-hbar-track"><span class="mon-hbar-fill" style="width:${Math.max(2, f.valor / max * 100)}%; background:${f.color || color};"></span></span>
+                        <span class="mon-hbar-track"><span class="mon-hbar-fill" data-k="${esc((f.color || color) + '|' + f.label)}" data-w="${Math.max(2, f.valor / max * 100).toFixed(1)}" style="width:0; background:${f.color || color}; color:${f.color || color};"></span></span>
                         <span class="mon-hbar-val">${esc(f.texto)}</span>
                     </div>`).join('');
             }
@@ -1069,7 +1310,7 @@
 
             const tile = (valor, label, sub, tono) => `
                 <div class="mon-tile${tono ? ' mon-tile-' + tono : ''}">
-                    <div class="mon-tile-val">${valor}</div>
+                    <div class="mon-tile-val"${typeof valor === 'number' ? ` data-num="${valor}" data-k="${esc(label)}"` : ''}>${typeof valor === 'number' ? valor.toLocaleString('es-AR') : valor}</div>
                     <div class="mon-tile-label">${label}</div>
                     ${sub ? `<div class="mon-tile-sub">${sub}</div>` : ''}
                 </div>`;
@@ -1085,7 +1326,10 @@
                         await zona_resolverPendientes();
                         st = calcularDashboard();
                     }
+                    // El gráfico por hora crece solo al abrir el dashboard, no en cada refresco
+                    cont.classList.toggle('mon-dash-primera', Object.keys(dash_prev).length === 0);
                     cont.innerHTML = htmlDashboard(st);
+                    dash_animar(cont);
                 } catch (err) {
                     console.error("[DASH]", err);
                     cont.innerHTML = `<div class="mon-empty">Error al calcular: ${esc(err.message)}</div>`;
@@ -1140,17 +1384,18 @@
                 const filasSbUnidad = topUnidades(st.standbys, 'StandBy');
 
                 // Carreteos en curso hace más tiempo
-                const filasCarreteo = vehiculos.filter(v => v.estado === "Carreteo").sort((a, b) => a.desde - b.desde).slice(0, 5).map(v => ({
+                const filasCarreteo = vehiculos.filter(v => ESTADOS[v.estado] && ESTADOS[v.estado].cat === "carreteo").sort((a, b) => a.desde - b.desde).slice(0, 5).map(v => ({
                     label: v.name, valor: Date.now() - v.desde, texto: fmt(Date.now() - v.desde),
-                    title: `${v.name}: carreteando hace ${fmt(Date.now() - v.desde)}${v.km != null ? ' · ' + v.km + ' km' : ''}`
+                    color: ESTADOS[v.estado].color,
+                    title: `${v.name}: ${etiquetaEstado(v)} hace ${fmt(Date.now() - v.desde)}${v.km != null ? ' · ' + v.km + ' km' : ''}`
                 }));
 
                 const controles = ["Estacion de Servicio", "Relevo", "Gomeria", "Taller"];
                 const sinComunicar = vehiculos.filter(v => v.communicates === false).length;
 
                 return `
-                    <div class="mon-dash-head">Hoy desde las 00:00 · ${st.activas.size} unidades con actividad de ${vehiculos.length}
-                        ${st.pendientes ? '<br><span class="mon-b-warn mon-badge">Algunas geocercas siguen resolviéndose</span>' : ''}</div>
+                    <div class="mon-dash-head">Hoy desde las <b>00:00</b> · <b>${st.activas.size}</b> unidades con actividad de <b>${vehiculos.length}</b>
+                        ${st.pendientes ? '<br><span class="mon-tag mon-tag-warn" style="margin-top:6px;">Algunas geocercas siguen resolviéndose</span>' : ''}</div>
 
                     <div class="mon-sec">Operativos finalizados</div>
                     <div class="mon-tiles">
@@ -1160,7 +1405,7 @@
                     </div>
                     <div class="mon-tiles">
                         ${tile(st.carreteos.length, 'Carreteos', `prom. ${fmt(promedio(st.carreteos.map(c => c.dur)))}`)}
-                        ${tile(Math.round(kmTotal).toLocaleString('es-AR'), 'km carreteados', st.carreteos.length ? `prom. ${(kmTotal / st.carreteos.length).toFixed(1)} km` : '')}
+                        ${tile(Math.round(kmTotal), 'km carreteados', st.carreteos.length ? `prom. ${(kmTotal / st.carreteos.length).toFixed(1)} km` : '')}
                         ${tile(fmt(promedio(st.esperas)), 'Espera promedio', `${st.esperas.length} con espera`)}
                     </div>
 
@@ -1186,10 +1431,10 @@
                     ${barrasHora(st.porHora)}
 
                     <div class="mon-sec">Geocercas con mayor espera promedio</div>
-                    ${barrasH(filasEspera, '#d97706')}
+                    ${barrasH(filasEspera, 'var(--warn)')}
 
                     <div class="mon-sec">Geocercas más visitadas</div>
-                    ${barrasH(filasVisitas, '#2563eb')}
+                    ${barrasH(filasVisitas, 'var(--neon)')}
 
                     <div class="mon-sec">Unidades con más tiempo en Demora</div>
                     ${barrasH(filasDemUnidad, ESTADOS["Demora"].color)}
@@ -1210,8 +1455,9 @@
             function toggleDashboard() {
                 dashVisible = !dashVisible;
                 elt.querySelector("#mon-root").classList.toggle('mon-modo-dash', dashVisible);
-                elt.querySelector("#mon-dash-btn").textContent = dashVisible ? '☰ Lista' : '📊 Dashboard';
-                if (dashVisible) renderDashboard();
+                elt.querySelector("#mon-dash-btn").innerHTML = dashVisible ? btnHtml(ICO.list, 'Lista') : btnHtml(ICO.dash, 'Dashboard');
+                if (dashVisible) { dash_prev = {}; renderDashboard(); }
+                else { lista_animarEntrada = true; renderLista(vehiculos); }
             }
 
             function renderContadores(todos) {
@@ -1227,7 +1473,7 @@
                 const alertas = [];
                 if (standby > 0) alertas.push(`${standby} en StandBy (> ${DEMORA_STANDBY_SEG / 3600} h detenido)`);
                 if (demoras > 0) alertas.push(`${demoras} en Demora`);
-                elt.querySelector("#mon-alerts").textContent = alertas.length ? `⚠ ${alertas.join(' · ')}` : '';
+                elt.querySelector("#mon-alerts").textContent = alertas.length ? alertas.join(' · ') : '';
             }
 
             let filtro_errorLogueado = false;
@@ -1250,15 +1496,16 @@
                     dibujarSeleccion();
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
+                    dibujarEtiquetas();
                     const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
                     const filtro = FILTRO_GRUPOS ? ` (filtro: ${FILTRO_GRUPOS_N} grupo${FILTRO_GRUPOS_N === 1 ? '' : 's'})` : '';
-                    statusEl.textContent = `✓ ${vehiculos.length} vehículos afectados${filtro} · actualizado ${timeStr}`;
+                    statusEl.textContent = `${vehiculos.length} vehículos afectados${filtro} · actualizado ${timeStr}`;
                     if (dashVisible) await renderDashboard();
                     statusEl.classList.remove("mon-error");
                     return true;
                 } catch (err) {
                     console.error("[RENDER]", err);
-                    statusEl.textContent = `✗ ${err.message}`;
+                    statusEl.textContent = err.message;
                     statusEl.classList.add("mon-error");
                     return false;
                 }
@@ -1273,24 +1520,26 @@
                 actualizando = true;
                 btn.disabled = true;
                 btn.classList.add('mon-btn-busy');
-                btn.textContent = '⏳ Actualizando...';
+                btn.innerHTML = btnHtml(ICO.refresh, 'Actualizando');
                 statusEl.textContent = 'Actualizando datos...';
+                setCargando(true);
                 statusEl.classList.remove("mon-error");
 
                 const [okStatus, okEventos] = await Promise.all([status_refreshData(), ev_refreshData()]);
                 const okRender = await renderAll();
                 const ok = okStatus && okEventos && okRender;
+                setCargando(false);
 
                 if (!ok) {
                     const fallas = [!okStatus && 'posiciones', !okEventos && 'eventos SUPE', !okRender && 'cálculo'].filter(Boolean);
-                    statusEl.textContent = `✗ Falló la actualización (${fallas.join(', ')}). Ver consola.`;
+                    statusEl.textContent = `Falló la actualización (${fallas.join(', ')}). Ver consola.`;
                     statusEl.classList.add("mon-error");
                 }
-                btn.textContent = ok ? '✓ Actualizado' : '✗ Error';
+                btn.innerHTML = ok ? btnHtml(ICO.ok, 'Actualizado') : btnHtml(ICO.err, 'Error');
                 btn.classList.remove('mon-btn-busy');
                 btn.classList.add(ok ? 'mon-btn-ok' : 'mon-btn-err');
                 setTimeout(() => {
-                    btn.textContent = '⟳ Actualizar';
+                    btn.innerHTML = btnHtml(ICO.refresh, 'Actualizar');
                     btn.classList.remove('mon-btn-ok', 'mon-btn-err');
                     btn.disabled = false;
                     actualizando = false;
@@ -1300,17 +1549,24 @@
             function setupEventListeners() {
                 elt.querySelector("#mon-search").addEventListener('input', e => {
                     currentSearch = e.target.value;
+                    lista_animarEntrada = true;
                     renderLista(vehiculos);
                     renderContadores(vehiculos);
+                    dibujarEtiquetas();
                 });
                 elt.querySelectorAll("[data-filter]").forEach(btn => {
                     btn.addEventListener('click', () => {
                         elt.querySelectorAll("[data-filter]").forEach(b => b.classList.remove('active'));
                         btn.classList.add('active');
                         currentFilter = btn.dataset.filter;
+                        lista_animarEntrada = true;
                         renderLista(vehiculos);
+                        dibujarEtiquetas();
                     });
                 });
+                const etqToggle = elt.querySelector("#mon-etq-toggle");
+                etqToggle.checked = etiquetasVisibles;
+                etqToggle.addEventListener('change', () => toggleEtiquetas(etqToggle.checked));
                 document.addEventListener('keydown', e => {
                     if (e.key === 'Escape' && seleccionId) seleccionar({ id: seleccionId });
                 });
@@ -1321,84 +1577,178 @@
             // Geotab descarta el <head>: los estilos se inyectan acá, acotados a #mon-root
             const style = document.createElement('style');
             style.textContent = `
-                #mon-root { display:flex; height:100%; width:100%; box-sizing:border-box; font-family:'Segoe UI',Roboto,Arial,sans-serif; color:#333; background:#fff; }
-                #mon-root .mon-panel { flex:1; min-width:0; height:100%; max-height:100vh; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; box-shadow:2px 0 8px rgba(0,0,0,0.08); }
-                #mon-root .mon-header { padding:16px 20px; border-bottom:1px solid #e5e7eb; background:#f9fafb; }
+                /* Tema claro de ui-designer con la paleta Geotab (neón = Innovation Blue) */
+                #mon-root {
+                    --bg:#ffffff; --surface:#ffffff; --surface-2:#f4f7fb; --line:#dfe5ee; --line-2:#c9d3e0;
+                    --text:#0f1a2b; --text-mute:#5b6b82; --brand:#25477b;
+                    --neon:#0078d3; --ok:#00a86b; --warn:#c77700; --crit:#e0213f; --magenta:#c4189f;
+                    --radius:2px; --ease:cubic-bezier(.2,.8,.2,1);
+                    --glow:0 0 0 1px var(--neon), 0 0 12px -2px var(--neon);
+                    --font:Roboto,'Segoe UI',Arial,sans-serif;
+                    --mono:'JetBrains Mono','IBM Plex Mono',Consolas,monospace;
+                    display:flex; height:100%; width:100%; box-sizing:border-box; font-family:var(--font); color:var(--text); background:var(--bg);
+                }
+                #mon-root *, #mon-root *::before, #mon-root *::after { box-sizing:border-box; }
+                #mon-root svg.mon-ico { width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linecap:square; flex:none; }
+                #mon-root .mon-panel { position:relative; flex:1; min-width:0; height:100%; max-height:100vh; border-right:1px solid var(--line); display:flex; flex-direction:column; background:var(--surface); }
+
+                /* Barra de progreso indeterminada (carga y actualización manual) */
+                #mon-root .mon-progress { position:absolute; top:0; left:0; right:0; height:2px; overflow:hidden; z-index:2; opacity:0; transition:opacity .2s; }
+                #mon-root .mon-progress::after { content:''; position:absolute; inset:0; width:33%; background:var(--neon); box-shadow:0 0 8px var(--neon); animation:mon-indet 1s var(--ease) infinite; }
+                #mon-root.mon-cargando .mon-progress { opacity:1; }
+
+                /* Header */
+                /* Retícula sutil de fondo en el header */
+                #mon-root .mon-header { padding:14px 16px 12px; border-bottom:1px solid var(--line); background-color:var(--surface);
+                    background-image:linear-gradient(rgba(37,71,123,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(37,71,123,.04) 1px, transparent 1px); background-size:24px 24px; }
                 #mon-root .mon-title { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
-                #mon-root .mon-title h3 { font-size:18px; font-weight:700; color:#1f2937; margin:0; letter-spacing:-0.5px; }
-                #mon-root .mon-btn { padding:4px 10px; border:1px solid #0076BE; background:#0076BE; color:#fff; border-radius:6px; font-size:12px; cursor:pointer; }
-                #mon-root .mon-btn:hover { background:#005A9E; }
-                #mon-root .mon-btn:disabled { cursor:default; }
-                #mon-root .mon-btn-busy { opacity:0.7; }
-                #mon-root .mon-btn-ok, #mon-root .mon-btn-ok:hover { background:#16a34a; border-color:#16a34a; }
-                #mon-root .mon-btn-err, #mon-root .mon-btn-err:hover { background:#dc2626; border-color:#dc2626; }
-                #mon-root #mon-search { width:100%; padding:9px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:10px; box-sizing:border-box; }
-                #mon-root #mon-search:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.1); }
-                #mon-root .mon-filters { display:flex; gap:6px; flex-wrap:wrap; }
-                #mon-root .mon-filters button { flex:1 0 auto; padding:6px 8px; border:1px solid #d1d5db; background:#fff; color:#4b5563; border-radius:6px; font-size:11px; font-weight:500; cursor:pointer; }
-                #mon-root .mon-filters button.active { background:#3b82f6; color:#fff; border-color:#3b82f6; }
-                #mon-root .mon-count { font-weight:700; margin-left:4px; }
-                #mon-root #mon-alerts { color:#b91c1c; font-size:12px; font-weight:600; margin-top:8px; }
-                #mon-root #mon-alerts:empty { display:none; }
-                #mon-root #mon-list { flex:1; min-height:0; overflow-y:auto; padding:12px; }
-                #mon-root .mon-empty { padding:16px; text-align:center; color:#999; font-size:12px; }
-                #mon-root .mon-group { font-weight:700; font-size:11px; color:#4b5563; text-transform:uppercase; padding:8px 12px; background:#f3f4f6; border-left:4px solid #3b82f6; margin:4px 0 8px; letter-spacing:0.5px; }
-                #mon-root .mon-row { padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:8px; cursor:pointer; transition:all 0.15s; }
-                #mon-root .mon-row:hover { background:#f0f4ff; border-color:#3b82f6; }
-                #mon-root .mon-row-disabled { opacity:0.6; cursor:not-allowed; }
-                #mon-root .mon-row-selected { border:2px solid #ff1fa8; background:#fff0f8; }
-                #mon-root .mon-row-focus { background:#fef3c7; border-color:#fbbf24; box-shadow:0 2px 8px rgba(251,191,36,0.25); }
-                #mon-root .mon-row-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
-                #mon-root .mon-name { font-weight:700; font-size:14px; color:#1f2937; }
-                #mon-root .mon-plate { font-size:11px; color:#6b7280; font-family:Consolas,monospace; }
-                #mon-root .mon-badges { margin-bottom:6px; }
-                #mon-root .mon-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:4px; }
-                #mon-root .mon-b-warn { background:#fef3c7; color:#92400e; }
-                #mon-root .mon-b-info { background:#e0f2fe; color:#075985; }
-                #mon-root .mon-b-off { background:#f3f4f6; color:#6b7280; }
-                #mon-root .mon-detail { font-size:12px; color:#6b7280; line-height:1.6; }
-                #mon-root .mon-detail strong { color:#374151; font-weight:600; }
+                #mon-root .mon-title h3 { display:flex; align-items:center; gap:8px; margin:0; font-size:15px; font-weight:700; color:var(--brand); letter-spacing:.06em; text-transform:uppercase; }
+                #mon-root .mon-title h3::before { content:''; width:3px; height:16px; background:var(--neon); box-shadow:0 0 8px var(--neon); }
                 #mon-root .mon-title-btns { display:flex; gap:6px; }
-                #mon-root .mon-btn-sec { background:#fff; color:#0076BE; }
-                #mon-root .mon-btn-sec:hover { background:#e8f2fa; }
-                /* Modo dashboard: se ocultan la lista, la búsqueda y los filtros */
-                #mon-root #mon-dash { display:none; flex:1; min-height:0; overflow-y:auto; padding:12px 14px; }
-                #mon-root.mon-modo-dash #mon-dash { display:block; }
+                #mon-root .mon-btn { display:inline-flex; align-items:center; gap:6px; padding:6px 11px; border:1px solid var(--line-2); background:transparent; color:var(--text); border-radius:var(--radius);
+                    font:600 11px var(--font); letter-spacing:.06em; text-transform:uppercase; cursor:pointer;
+                    transition:border-color .18s var(--ease), box-shadow .18s var(--ease), transform .18s var(--ease), color .18s; }
+                #mon-root .mon-btn:hover:not(:disabled) { border-color:var(--neon); color:var(--neon); box-shadow:var(--glow); transform:translateY(-1px); }
+                #mon-root .mon-btn:disabled { cursor:default; }
+                #mon-root .mon-btn-primary { background:var(--neon); border-color:var(--neon); color:#fff; clip-path:polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%); }
+                #mon-root .mon-btn-primary:hover:not(:disabled) { color:#fff; background:#0067b5; }
+                #mon-root .mon-btn-busy .mon-ico { animation:mon-spin 1s linear infinite; }
+                #mon-root .mon-btn-ok, #mon-root .mon-btn-ok:hover { background:var(--ok) !important; border-color:var(--ok) !important; }
+                #mon-root .mon-btn-err, #mon-root .mon-btn-err:hover { background:var(--crit) !important; border-color:var(--crit) !important; }
+
+                /* Feeds + toggle */
+                #mon-root .mon-subbar { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+                #mon-root #mon-feeds { display:flex; gap:6px; flex-wrap:wrap; }
+                #mon-root .mon-feed { --c:var(--text-mute); display:inline-flex; align-items:center; gap:7px; padding:3px 8px 3px 7px; border:1px solid var(--line); border-left:2px solid var(--c);
+                    border-radius:var(--radius); font:600 10.5px var(--font); letter-spacing:.05em; text-transform:uppercase; color:var(--text); cursor:default; background:var(--surface); }
+                #mon-root .mon-feed i { position:relative; width:6px; height:6px; background:var(--c); }
+                #mon-root .mon-feed-ok   { --c:var(--ok); }
+                #mon-root .mon-feed-warn { --c:var(--warn); }
+                #mon-root .mon-feed-down { --c:var(--crit); color:var(--crit); }
+                #mon-root .mon-feed-off  { --c:var(--line-2); color:var(--text-mute); }
+                #mon-root .mon-feed-ok i::after, #mon-root .mon-feed-down i::after { content:''; position:absolute; inset:0; background:inherit; animation:mon-ping 1.6s var(--ease) infinite; }
+                #mon-root .mon-switch { display:inline-flex; align-items:center; gap:7px; font:600 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--text-mute); cursor:pointer; user-select:none; }
+                #mon-root .mon-switch input { display:none; }
+                #mon-root .mon-switch-track { position:relative; width:30px; height:14px; border:1px solid var(--line-2); background:var(--surface-2); transition:border-color .18s, background .18s; }
+                #mon-root .mon-switch-track::after { content:''; position:absolute; top:2px; left:2px; width:8px; height:8px; background:var(--text-mute); transition:transform .18s var(--ease), background .18s, box-shadow .18s; }
+                #mon-root .mon-switch input:checked + .mon-switch-track { border-color:var(--neon); background:color-mix(in srgb, var(--neon) 8%, transparent); }
+                #mon-root .mon-switch input:checked + .mon-switch-track::after { transform:translateX(16px); background:var(--neon); box-shadow:0 0 6px var(--neon); }
+                #mon-root .mon-switch:hover { color:var(--text); }
+
+                /* Búsqueda y filtros */
+                #mon-root #mon-search { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface-2); color:var(--text); font:13px var(--font); margin-bottom:10px; transition:border-color .18s, box-shadow .18s; }
+                #mon-root #mon-search::placeholder { color:var(--text-mute); }
+                #mon-root #mon-search:focus { outline:none; border-color:var(--neon); box-shadow:var(--glow); background:var(--surface); }
+                #mon-root .mon-filters { display:flex; flex-wrap:wrap; border:1px solid var(--line); border-radius:var(--radius); }
+                #mon-root .mon-filters button { position:relative; flex:1 0 auto; padding:7px 8px 6px; border:0; border-right:1px solid var(--line); background:transparent; color:var(--text-mute);
+                    font:600 10.5px var(--font); letter-spacing:.06em; text-transform:uppercase; cursor:pointer; transition:color .15s, background .15s; }
+                #mon-root .mon-filters button:last-child { border-right:0; }
+                #mon-root .mon-filters button::after { content:''; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--neon); transform:scaleX(0); transition:transform .2s var(--ease); }
+                #mon-root .mon-filters button:hover { color:var(--text); background:var(--surface-2); }
+                #mon-root .mon-filters button.active { color:var(--neon); background:color-mix(in srgb, var(--neon) 6%, transparent); }
+                #mon-root .mon-filters button.active::after { transform:scaleX(1); box-shadow:0 0 6px var(--neon); }
+                #mon-root .mon-count { font-family:var(--mono); font-weight:600; margin-left:5px; color:var(--text); }
+                #mon-root #mon-alerts { margin-top:10px; padding:6px 10px; border-left:2px solid var(--crit); background:color-mix(in srgb, var(--crit) 6%, transparent); color:var(--crit); font:600 11px var(--font); letter-spacing:.04em; animation:mon-enter .22s var(--ease) both; }
+                #mon-root #mon-alerts:empty { display:none; }
+
+                /* Lista */
+                #mon-root #mon-list { flex:1; min-height:0; overflow-y:auto; padding:4px 0 12px; }
+                #mon-root .mon-empty { padding:20px 16px; color:var(--text-mute); font:600 11px var(--font); letter-spacing:.08em; text-transform:uppercase; }
+                #mon-root .mon-group { --c:var(--neon); display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; z-index:1; margin:10px 0 0; padding:7px 16px 6px 14px;
+                    border-left:2px solid var(--c); border-bottom:1px solid var(--line); background:var(--surface);
+                    font:700 10.5px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--text); }
+                #mon-root .mon-group b { font-family:var(--mono); color:var(--c); font-weight:600; }
+                #mon-root .mon-row { --c:var(--neon); position:relative; padding:10px 16px 10px 14px; border-left:2px solid transparent; border-bottom:1px solid var(--line); background:var(--surface); cursor:pointer;
+                    transition:background .15s, border-color .15s; }
+                #mon-root .mon-row::after { content:''; position:absolute; left:0; bottom:-1px; height:1px; width:100%; background:var(--neon); transform:scaleX(0); transform-origin:left; transition:transform .18s var(--ease); }
+                #mon-root .mon-row:hover { background:var(--surface-2); border-left-color:var(--c); }
+                #mon-root .mon-row:hover::after { transform:scaleX(1); }
+                #mon-root .mon-row-disabled { opacity:.55; cursor:not-allowed; }
+                #mon-root .mon-row-selected, #mon-root .mon-row-selected:hover { border-left-color:var(--magenta); background:color-mix(in srgb, var(--magenta) 6%, transparent); }
+                #mon-root .mon-row-focus { animation:mon-flash 1s var(--ease) 2; }
+                #mon-root .mon-row-enter { animation:mon-enter .22s var(--ease) both; animation-delay:calc(var(--i, 0) * 30ms); }
+                #mon-root .mon-changed { animation:mon-flash .7s var(--ease); }
+                #mon-root .mon-row-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px; }
+                #mon-root .mon-name { font-weight:700; font-size:13.5px; color:var(--text); }
+                #mon-root .mon-plate { font:600 11px var(--mono); color:var(--text-mute); letter-spacing:.04em; }
+                #mon-root .mon-badges { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:8px; }
+                #mon-root .mon-tag { --c:var(--text-mute); display:inline-flex; align-items:center; gap:6px; padding:2px 7px; border:1px solid color-mix(in srgb, var(--c) 55%, transparent); border-radius:var(--radius);
+                    font:600 10.5px var(--font); letter-spacing:.05em; text-transform:uppercase; color:color-mix(in srgb, var(--c) 78%, var(--text)); background:color-mix(in srgb, var(--c) 6%, transparent); }
+                #mon-root .mon-tag-estado::before { content:''; width:6px; height:6px; background:var(--c); }
+                #mon-root .mon-tag-warn { --c:var(--warn); }
+                #mon-root .mon-tag-info { --c:var(--neon); }
+                #mon-root .mon-tag-off  { --c:var(--text-mute); }
+                #mon-root .mon-kv { display:grid; grid-template-columns:92px 1fr; gap:3px 10px; font-size:12px; line-height:1.45; }
+                #mon-root .mon-kv dt { font:600 9.5px/1.9 var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--text-mute); }
+                #mon-root .mon-kv dd { margin:0; color:var(--text); min-width:0; overflow-wrap:anywhere; }
+                #mon-root .mon-mono { font-family:var(--mono); font-size:11.5px; font-variant-numeric:tabular-nums; }
+                #mon-root .mon-mute { color:var(--text-mute); }
+
+                /* Modo dashboard */
+                #mon-root #mon-dash { display:none; flex:1; min-height:0; overflow-y:auto; padding:12px 16px 16px; }
+                #mon-root.mon-modo-dash #mon-dash { display:block; animation:mon-view .2s var(--ease) both; }
+                #mon-root #mon-list { animation:mon-view .2s var(--ease) both; }
                 #mon-root.mon-modo-dash #mon-list,
                 #mon-root.mon-modo-dash #mon-search,
                 #mon-root.mon-modo-dash .mon-filters { display:none; }
-                #mon-root .mon-dash-head { font-size:12px; color:#4b5563; margin-bottom:4px; }
-                #mon-root .mon-sec { font-size:11px; font-weight:700; color:#4b5563; text-transform:uppercase; letter-spacing:0.5px; margin:16px 0 8px; }
-                #mon-root .mon-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px; margin-bottom:8px; }
+                #mon-root .mon-dash-head { font:600 10.5px var(--font); letter-spacing:.08em; text-transform:uppercase; color:var(--text-mute); }
+                #mon-root .mon-dash-head b { font-family:var(--mono); color:var(--text); }
+                #mon-root .mon-sec { display:flex; align-items:center; gap:8px; font:700 10.5px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--brand); margin:20px 0 10px; }
+                #mon-root .mon-sec::after { content:''; flex:1; height:1px; background:var(--line); }
+                #mon-root .mon-tiles { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-bottom:8px; }
                 #mon-root .mon-tiles-4 { grid-template-columns:repeat(auto-fit, minmax(80px, 1fr)); }
-                #mon-root .mon-tile { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:8px 10px; }
-                #mon-root .mon-tile-val { font-size:20px; font-weight:700; color:#1f2937; line-height:1.2; }
-                #mon-root .mon-tile-label { font-size:11px; color:#4b5563; font-weight:600; }
-                #mon-root .mon-tile-sub { font-size:10px; color:#6b7280; margin-top:2px; }
-                #mon-root .mon-tile-warn { border-left:4px solid #f59e0b; }
-                #mon-root .mon-tile-crit { border-left:4px solid #9ca3af; }
-                #mon-root .mon-hbar { display:grid; grid-template-columns:minmax(130px, 30%) 1fr 56px; align-items:center; gap:8px; font-size:11px; margin-bottom:5px; }
-                #mon-root .mon-hbar-label { color:#374151; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-                #mon-root .mon-hbar-track { height:10px; background:#f3f4f6; border-radius:0 4px 4px 0; }
-                #mon-root .mon-hbar-fill { display:block; height:100%; border-radius:0 4px 4px 0; }
-                #mon-root .mon-hbar-val { text-align:right; color:#1f2937; font-weight:600; font-variant-numeric:tabular-nums; }
-                #mon-root .mon-legend { display:flex; gap:12px; font-size:11px; color:#4b5563; margin-bottom:6px; }
-                #mon-root .mon-leg i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
-                #mon-root .mon-vchart { display:flex; align-items:flex-end; gap:2px; height:110px; border-bottom:1px solid #d1d5db; padding-bottom:0; }
+                #mon-root .mon-tile { --c:var(--neon); position:relative; background:var(--surface); padding:10px 12px; }
+                #mon-root .mon-tile::before, #mon-root .mon-tile::after { content:''; position:absolute; width:8px; height:8px; border-color:var(--c); border-style:solid; opacity:.8; }
+                #mon-root .mon-tile::before { top:4px; left:4px; border-width:1px 0 0 1px; }
+                #mon-root .mon-tile::after { bottom:4px; right:4px; border-width:0 1px 1px 0; }
+                #mon-root .mon-tile-val { font:600 24px/1.15 var(--font); font-variant-numeric:tabular-nums; color:var(--text); }
+                #mon-root .mon-tile-label { margin-top:3px; font:600 9.5px var(--font); letter-spacing:.1em; text-transform:uppercase; color:var(--text-mute); }
+                #mon-root .mon-tile-sub { margin-top:2px; font:10.5px var(--mono); color:var(--text-mute); }
+                #mon-root .mon-tile-warn { --c:var(--warn); }
+                #mon-root .mon-tile-warn .mon-tile-val { color:var(--warn); }
+                #mon-root .mon-tile-crit { --c:var(--crit); }
+                #mon-root .mon-tile-crit .mon-tile-val { color:var(--crit); }
+                #mon-root .mon-hbar { display:grid; grid-template-columns:minmax(120px, 30%) 1fr 58px; align-items:center; gap:10px; font-size:11.5px; padding:3px 0; }
+                #mon-root .mon-hbar-label { color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+                #mon-root .mon-hbar-track { position:relative; height:6px; background:var(--surface-2); border-bottom:1px solid var(--line); }
+                #mon-root .mon-hbar-fill { display:block; height:100%; transition:width .55s var(--ease); }
+                #mon-root .mon-hbar:hover .mon-hbar-fill { box-shadow:0 0 8px currentColor; }
+                #mon-root .mon-hbar-val { text-align:right; font:600 11px var(--mono); font-variant-numeric:tabular-nums; color:var(--text); }
+                #mon-root .mon-legend { display:flex; gap:14px; font:600 10px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--text-mute); margin-bottom:8px; }
+                #mon-root .mon-leg i { display:inline-block; width:8px; height:8px; margin-right:5px; vertical-align:0; }
+                #mon-root .mon-vchart { display:flex; align-items:flex-end; gap:2px; height:110px; border-bottom:1px solid var(--line-2); }
                 #mon-root .mon-vcol { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; position:relative; cursor:default; }
-                #mon-root .mon-vcol:hover .mon-vcol-bar { opacity:0.75; }
-                #mon-root .mon-vcol-futuro { opacity:0.35; }
-                #mon-root .mon-vcol-bar { display:flex; flex-direction:column-reverse; gap:2px; height:100%; justify-content:flex-start; }
+                #mon-root .mon-vcol:hover .mon-vcol-bar { filter:brightness(1.15) drop-shadow(0 0 4px var(--neon)); }
+                #mon-root .mon-vcol-futuro { opacity:.3; }
+                #mon-root .mon-vcol-bar { display:flex; flex-direction:column-reverse; gap:2px; height:100%; justify-content:flex-start; transform-origin:bottom; }
+                #mon-root #mon-dash.mon-dash-primera .mon-vcol-bar { animation:mon-grow .55s var(--ease) both; }
                 #mon-root .mon-vcol-bar span { display:block; width:100%; }
-                #mon-root .mon-vcol-bar span:last-child { border-radius:4px 4px 0 0; }
-                #mon-root .mon-vcol-x { position:absolute; bottom:-16px; left:0; font-size:9px; color:#6b7280; }
+                #mon-root .mon-vcol-x { position:absolute; bottom:-16px; left:0; font:9.5px var(--mono); color:var(--text-mute); }
                 #mon-root .mon-vchart + * { margin-top:22px; }
-                #mon-root .mon-note { font-size:11px; color:#6b7280; margin-top:4px; }
-                /* El contenedor de Geotab es algo más alto que el área visible: el margen inferior
-                   sube el pie para que el cartel de estado no quede cortado */
-                #mon-root .mon-footer { padding:8px 12px 36px; border-top:1px solid #e5e7eb; background:#f9fafb; }
-                #mon-root #mon-status { padding:8px 12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500; }
-                #mon-root #mon-status.mon-error { background:#fef2f2; color:#991b1b; border-color:#fecaca; }
+                #mon-root .mon-note { font:10.5px var(--mono); color:var(--text-mute); margin-top:4px; }
+
+                /* Pie: el contenedor de Geotab es algo más alto que el área visible, el margen
+                   inferior sube el pie para que el cartel de estado no quede cortado */
+                #mon-root .mon-footer { padding:8px 16px 36px; border-top:1px solid var(--line); background:var(--surface); }
+                #mon-root #mon-status { display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid var(--line); border-left:2px solid var(--ok);
+                    font:600 10.5px var(--font); letter-spacing:.06em; text-transform:uppercase; color:var(--text); }
+                #mon-root #mon-status::before { content:''; flex:none; width:6px; height:6px; background:var(--ok); box-shadow:0 0 6px var(--ok); }
+                #mon-root #mon-status.mon-error { border-left-color:var(--crit); color:var(--crit); }
+                #mon-root #mon-status.mon-error::before { background:var(--crit); box-shadow:0 0 6px var(--crit); }
+                #mon-root.mon-cargando #mon-status { border-left-color:var(--neon); }
+                #mon-root.mon-cargando #mon-status::before { background:var(--neon); box-shadow:0 0 6px var(--neon); animation:mon-blink 1s steps(2) infinite; }
+
+                @keyframes mon-enter { from { opacity:0; transform:translateY(6px); } }
+                @keyframes mon-view  { from { opacity:0; transform:translateY(8px); } }
+                @keyframes mon-flash { from { box-shadow:inset 0 0 0 1px var(--neon), 0 0 16px -2px var(--neon); } }
+                @keyframes mon-ping  { from { transform:scale(1); opacity:.6; } to { transform:scale(2.6); opacity:0; } }
+                @keyframes mon-indet { from { transform:translateX(-100%); } to { transform:translateX(300%); } }
+                @keyframes mon-grow  { from { transform:scaleY(0); } }
+                @keyframes mon-spin  { to { transform:rotate(360deg); } }
+                @keyframes mon-blink { 50% { opacity:.2; } }
+                @media (prefers-reduced-motion: reduce) {
+                    #mon-root *, #mon-root *::before, #mon-root *::after { animation:none !important; transition:none !important; }
+                }
             `;
 
             elt.style.width = '100%';
@@ -1407,13 +1757,20 @@
             elt.innerHTML = `
                 <div id="mon-root">
                   <div class="mon-panel">
+                    <div class="mon-progress"></div>
                     <div class="mon-header">
                       <div class="mon-title">
                         <h3>Monitor SUPE</h3>
                         <div class="mon-title-btns">
-                          <button id="mon-dash-btn" class="mon-btn mon-btn-sec" title="Estadísticas del día">📊 Dashboard</button>
-                          <button id="mon-refresh" class="mon-btn" title="Actualizar ahora">⟳ Actualizar</button>
+                          <button id="mon-dash-btn" class="mon-btn" title="Estadísticas del día">${ICO.dash}<span>Dashboard</span></button>
+                          <button id="mon-refresh" class="mon-btn mon-btn-primary" title="Actualizar ahora">${ICO.refresh}<span>Actualizar</span></button>
                         </div>
+                      </div>
+                      <div class="mon-subbar">
+                        <div id="mon-feeds"><span class="mon-feed mon-feed-off"><i></i>Feeds: consultando...</span></div>
+                        <label class="mon-switch" title="Mostrar el estado de cada unidad junto a su ícono en el mapa">
+                          <input type="checkbox" id="mon-etq-toggle"><span class="mon-switch-track"></span>Etiquetas
+                        </label>
                       </div>
                       <input type="text" id="mon-search" placeholder="Buscar por nombre, patente o geocerca...">
                       <div class="mon-filters">
@@ -1449,8 +1806,11 @@
 
                 setupEventListeners();
                 enlazarActivosNativos();
+                feeds_refresh();
+                feeds_refreshIntervalId = setInterval(feeds_refresh, FEEDS_REFRESH_SEG * 1000);
                 const statusEl = elt.querySelector("#mon-status");
                 try {
+                    setCargando(true);
                     statusEl.textContent = "Cargando vehículos y geocercas...";
                     await Promise.all([gtb_loadDevices(), gtb_loadDrivers(), gtb_loadZonas(), gtb_loadGrupos(), status_refreshData()]);
 
@@ -1471,18 +1831,21 @@
                     statusEl.textContent = "Resolviendo geocercas de ingreso...";
                     await renderAll();
                     initLog(`[APP] Monitor iniciado: ${vehiculos.length} vehículos afectados`);
+                    setCargando(false);
 
                     status_refreshIntervalId = setInterval(status_refreshData, STATUS_REFRESH_SEG * 1000);
                     ev_refreshIntervalId = setInterval(ev_refreshData, EV_REFRESH_SEG * 1000);
                     render_refreshIntervalId = setInterval(renderAll, RENDER_REFRESH_SEG * 1000);
                 } catch (err) {
                     console.error("[APP] Initialization failed:", err);
-                    statusEl.textContent = `✗ Error al inicializar: ${err.message}`;
+                    setCargando(false);
+                    statusEl.textContent = `Error al inicializar: ${err.message}`;
                     statusEl.classList.add("mon-error");
                 }
             }).catch(err => {
                 console.error("[Session]", err.message);
-                elt.querySelector("#mon-status").textContent = "✗ Error loading session";
+                elt.querySelector("#mon-status").textContent = "Error al cargar la sesión";
+                elt.querySelector("#mon-status").classList.add("mon-error");
             });
         };
 
