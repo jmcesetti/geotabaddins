@@ -947,7 +947,30 @@ render_pipeline
             }
 
             // Dibuja ícono + etiqueta de un equipo en su posición actual (e.pos)
+            // Pausa de redibujo mientras el mapa se está moviendo (setBounds del panel, arrastre o zoom).
+            // Redibujar markers en medio de un setBounds hacía que MyGeotab volviera a la vista anterior.
+            const ANIM_PAUSE_MS = 2500;
+            let anim_pauseUntil = 0;
+            function anim_pause(ms) {
+                anim_pauseUntil = Math.max(anim_pauseUntil, Date.now() + (ms || ANIM_PAUSE_MS));
+            }
+            try {
+                service.map.attach("change", () => anim_pause(1000));
+                service.map.attach("changed", viewport => {
+                    anim_pause(500);
+                    dbg("[MAP] Vista:", viewport && viewport.bounds ? JSON.stringify(viewport.bounds) : viewport);
+                });
+            } catch (err) {
+                dbg("[MAP] No se pudo escuchar los cambios de vista:", err);
+            }
+
             function anim_drawEntry(e) {
+                // En pausa: queda marcado y lo dibuja anim_tick cuando termine la pausa
+                if (Date.now() < anim_pauseUntil) {
+                    e.dirty = true;
+                    return;
+                }
+                e.dirty = false;
                 const { device, icon, labelText } = e.look;
                 const center = { lat: e.pos.lat, lng: e.pos.lng };
                 const items = [];
@@ -999,8 +1022,13 @@ render_pipeline
             // Avanza las animaciones en curso
             function anim_tick() {
                 const now = Date.now();
+                if (now < anim_pauseUntil) return;
                 Object.values(anim_entries).forEach(e => {
-                    if (e.pos.lat === e.to.lat && e.pos.lng === e.to.lng) return;
+                    if (e.pos.lat === e.to.lat && e.pos.lng === e.to.lng) {
+                        // Quedó pendiente de una pausa: dibujar en su lugar
+                        if (e.dirty) anim_drawEntry(e);
+                        return;
+                    }
                     const p = Math.min(1, (now - e.startMs) / ANIM_MS);
                     e.pos = p >= 1 ? e.to : {
                         lat: e.from.lat + (e.to.lat - e.from.lat) * p,
@@ -1331,6 +1359,8 @@ render_pipeline
                                 const lat = parseFloat(target.lat);
                                 const lng = parseFloat(target.lon);
 
+                                // Sin redibujos mientras el mapa viaja al activo
+                                anim_pause();
                                 try {
                                     const map = service.map;
                                     const padding = 0.02;
