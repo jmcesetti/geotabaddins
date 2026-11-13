@@ -977,7 +977,7 @@ render_pipeline
                                     getStatusDisplay(device.status),
                                     formatDeviceDate(pos.dateString),
                                     speed + " km/h",
-                                    pos.src === 'GO' ? 'Posición del GO' : 'Posición de la cámara'
+                                    pos.src === 'GO' ? 'Datos del GO (más recientes)' : 'Datos de la cámara'
                                 ]
                             },
                             1
@@ -1103,6 +1103,15 @@ render_pipeline
                     }
                     // Posición a usar: la más reciente entre cámara y GO
                     device.pos = pos_resolve(device);
+                    // Si el GO es más nuevo, también se usan sus demás datos (estado, fecha, velocidad).
+                    // Los de la cámara quedan en device.cam.
+                    device.dataSrc = device.pos ? device.pos.src : 'CAM';
+                    if (device.dataSrc === 'GO') {
+                        device.cam = { status: device.status, lastSeenOnline: device.lastSeenOnline, speed: device.speed };
+                        device.status = device.goStatus.communicates ? 'online' : 'offline';
+                        device.lastSeenOnline = device.goStatus.dateTime;
+                        device.speed = device.goStatus.speed;
+                    }
                 });
 
                 // El panel lista TODAS las cámaras encontradas; el mapa solo las 'onMap'
@@ -1289,8 +1298,8 @@ render_pipeline
                                 <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; background:${sourceBadgeColor}">${device.source || 'SRF'}</span>
                                 <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; letter-spacing:0.3px; ${mapBadge.style}">${mapBadge.text}</span><br>
                                 ${label_driverName(device) ? `<strong style="color:#374151; font-weight:600;">Conductor:</strong> ${label_escape(label_driverName(device))}<br>` : ''}
-                                <strong style="color:#374151; font-weight:600;">Última comunicación:</strong> ${dateFormatted}<br>
-                                <strong style="color:#374151; font-weight:600;">Velocidad de Cámara:</strong> ${speed} km/h<br>
+                                <strong style="color:#374151; font-weight:600;">Última comunicación${device.dataSrc === 'GO' ? ' (GO)' : ''}:</strong> ${dateFormatted}<br>
+                                <strong style="color:#374151; font-weight:600;">Velocidad ${device.dataSrc === 'GO' ? 'del GO' : 'de Cámara'}:</strong> ${speed} km/h<br>
                                 <span style="font-size:11px; ${locationStyle}">${locationStatus}</span>
                             </div>
                         `;
