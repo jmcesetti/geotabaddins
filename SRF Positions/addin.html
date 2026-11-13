@@ -685,6 +685,8 @@ render_pipeline
                     lat: record ? record.latitude : null,
                     lon: record ? record.longitude : null,
                     speed: record ? Math.round(record.speed || 0) : 0,
+                    // Solo DeviceStatusInfo (fallback) trae rumbo; LogRecord no
+                    bearing: record && typeof record.bearing === 'number' ? record.bearing : null,
                     status: camStatus ? fcs_mapCameraStatus(camStatus.status) : (record ? 'online' : 'offline'),
                     lastSeenOnline: camStatus ? camStatus.lastUpdated : (record ? record.dateTime : null),
                     source: 'FCS'
@@ -693,6 +695,99 @@ render_pipeline
 
             dbg(`[FCS] Refresh: ${fcs_allDevices.filter(d => d.lat && d.lon).length}/${fcs_allDevices.length} con ubicación`);
             return fcs_allDevices;
+        }
+
+        // ====== ICONOS DEL MAPA ======
+        // Reemplazan a los círculos de color. Estados:
+        //   inactive      -> sin reportar hace más de 24 h
+        //   moving        -> velocidad > 0, flecha orientada según el rumbo
+        //   stoppedAtHome -> detenido hace más de 30 min
+        //   stopped       -> detenido hace menos de 30 min
+        const ICON_SIZE = 32;
+        const ICON_INACTIVE_MS = 24 * 60 * 60 * 1000;
+        const ICON_HOME_MS = 30 * 60 * 1000;
+        const ICON_LABELS = {
+            inactive: 'Sin reportar hace más de 24 h',
+            moving: 'En movimiento',
+            stoppedAtHome: 'Detenido hace más de 30 min',
+            stopped: 'Detenido'
+        };
+
+        // SVG de cada estado. {ROT} se reemplaza por el rumbo (grados, sentido horario desde el norte).
+        const ICON_SVG = {
+            inactive: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#66788C" stroke="#ffffff" stroke-width="2"/><path d="M9.41085 4.07636c.48125.33833.86045.80266 1.09545 1.34167.0981.20766.3133.33366.542.31791.7554-.03092 1.4741.32958 1.9016.95317.2555.3675.3891.80617.3833 1.25358.0198.54483-.1768 1.07567-.5472 1.47642-.2187.2275-.2158.58799.007.81139.231.2281.6032.2252.8307-.0058.0046-.0047.0093-.0099.014-.0146.5547-.58799.8633-1.36674.8622-2.17524.0548-1.77334-1.2775-3.28359-3.0433-3.45159-.0461-.00466-.0875-.03033-.1114-.07-.8138-1.34808-2.27093-2.17408-3.84535-2.17991-.44392 0-.88492.0665-1.309.19775-.37975.11666-.47075.49291-.21992.875.13417.21058.3955.30041.63117.21758.95783-.2625 1.98217-.09742 2.80875.45267M3.30627 10.1448c-.46259-.0088-.90942-.17328-1.267-.46669-.26425-.28117-.39959-.65975-.37275-1.04475.00058-.833.6755-1.5085 1.5085-1.50909.105 0 .20941.0105.31208.0315.16567.03559.33892-.0035.47308-.10733.13475-.10325.21759-.25958.2275-.42875.00817-.13067.01109-.29517.00875-.42292-.00525-.29166.01284-.42758-.15225-.59266-.21525-.21583-.56466-.21584-.7805-.00059-.07525.07525-.12716.17034-.14933.27417v.01108c-.00817.04025-.04258.07001-.084.07176-.89483.05249-1.70625.54425-2.1665 1.31366-.256083.43109-.382666.92692-.364 1.428-.014.6755.245584 1.32771.72042 1.80831.57516.5099 1.31483.7951 2.08308.8033h5.03708c.322 0 .58334-.2614.58334-.5834 0-.1545-.06125-.3027-.17092-.4124-.10908-.1096-.25783-.1709-.41242-.1709zm10.19783 3.6843c.2316.224.6008.2176.8248-.0146.2182-.2263.2182-.5845 0-.8102L1.4956.170942C1.26402-.0530585.894767-.0466418.670767.185525c-.218167.226333-.218167.5845 0 .81025z" transform="translate(-7.001, -6.993)" fill="#ffffff" stroke="#ffffff"/></g></svg>',
+            moving: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#0078D3" stroke="#FFFFFF" stroke-width="2"/><g transform="rotate({ROT})"><path d="M12.7398 12.9976 7.13979.397574C7.07728.282418 6.98484.186269 6.87223.11927 6.75962.0522714 6.63102.0169067 6.49999.0169067S6.24036.0522714 6.12775.11927c-.11261.066999-.20504.163148-.26756.278304L.260191 12.9976c-.058574.1318-.074988.2785-.046995.42.027993.1416.099025.271.203379.3706s.236934.1645.379601.1859c.142667.0213.288454-.0019.417414-.0665l5.2864-2.6432 5.28641 2.6432c.129.0646.2747.0878.4174.0665.1427-.0214.2753-.0863.3796-.1859.1044-.0996.1754-.229.2034-.3706.028-.1415.0116-.2882-.047-.42" transform="translate(-6.30011, -6.98244)" fill="#FFFFFF" stroke="#FFFFFF"/></g></g></svg>',
+            stoppedAtHome: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#0078D3" stroke="#FFFFFF" stroke-width="2"/><path d="M19.34 14.693a1.9 1.9 0 0 0-.717.118c-.965.35-1.425 1.337-1.074 2.302a1.9 1.9 0 0 0 .28.512l-1.07 1.54a1.8 1.8 0 0 0-1.185.032c-.965.351-1.423 1.338-1.072 2.303.336.927 1.26 1.384 2.187 1.107l1.487 1.903c-.4.468-.53 1.123-.295 1.77.35.964 1.338 1.424 2.303 1.072.795-.29 1.246-1.01 1.183-1.795l2.06-.75c.457.642 1.268.904 2.063.615.965-.35 1.425-1.338 1.073-2.303-.244-.672-.797-1.1-1.436-1.178l-.082-2.369c.937-.362 1.38-1.335 1.033-2.287-.35-.965-1.336-1.423-2.3-1.072a1.8 1.8 0 0 0-.928.732l-1.81-.492a1.9 1.9 0 0 0-.114-.57c-.264-.724-.885-1.163-1.586-1.19m1.441 2.754 1.809.492q.01.286.113.577c.229.63.73 1.042 1.318 1.156l.084 2.44c-.698.322-1.088.997-1.029 1.73l-2.06.75c-.44-.619-1.208-.884-1.975-.643l-1.475-1.888c.414-.47.551-1.134.313-1.79a1.9 1.9 0 0 0-.283-.515l1.07-1.537c.366.118.778.115 1.186-.033s.725-.412.93-.739" transform="translate(-21, -21)" fill="#FFFFFF" stroke="#FFFFFF"/></g></svg>',
+            stopped: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#0078D3" stroke="#FFFFFF" stroke-width="2"/><path d="M0 1.25C0 .835786.335786.5.75.5h7.5c.41421 0 .75.335786.75.75v7.5c0 .41421-.33579.75-.75.75H.75C.335786 9.5 0 9.16421 0 8.75z" transform="translate(-4.5, -4.5)" fill="#FFFFFF" stroke="#FFFFFF"/></g></svg>'
+        };
+
+        // Data URIs ya armados; la flecha se cachea por rumbo redondeado a 5°
+        const icon_uriCache = {};
+        function icon_getUri(state, bearing) {
+            const rot = state === 'moving' ? (Math.round((bearing || 0) / 5) * 5) % 360 : 0;
+            const key = `${state}:${rot}`;
+            if (!icon_uriCache[key]) {
+                const svg = ICON_SVG[state].replace('{ROT}', rot);
+                icon_uriCache[key] = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+            }
+            return icon_uriCache[key];
+        }
+
+        // Rumbo (grados desde el norte, sentido horario) entre dos posiciones
+        function icon_bearingBetween(lat1, lon1, lat2, lon2) {
+            const toRad = d => d * Math.PI / 180;
+            const dLon = toRad(lon2 - lon1);
+            const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+            const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                      Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        }
+
+        // Distancia aproximada en metros (suficiente para descartar el ruido del GPS)
+        function icon_distanceM(lat1, lon1, lat2, lon2) {
+            const k = 111320;
+            const dx = (lon2 - lon1) * k * Math.cos(lat1 * Math.PI / 180);
+            const dy = (lat2 - lat1) * k;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // Memoria entre redibujos, por cámara: última posición, rumbo y desde cuándo está detenida.
+        // Surfsight no informa rumbo: se calcula con el desplazamiento entre refrescos.
+        const icon_track = {};
+
+        // Devuelve { state, bearing } para un equipo y actualiza su memoria
+        function icon_resolve(device, nowMs) {
+            const key = device.imei || device.name;
+            const t = icon_track[key] || (icon_track[key] = {});
+            const lat = parseFloat(device.lat);
+            const lon = parseFloat(device.lon);
+            const reportMs = device.lastSeenOnline ? new Date(device.lastSeenOnline).getTime() : NaN;
+            const isMoving = Number(device.speed) > 0;
+
+            // Rumbo: el que informe la fuente (FCS vía DeviceStatusInfo); si no, por desplazamiento
+            if (typeof device.bearing === 'number' && device.bearing >= 0) {
+                t.bearing = device.bearing;
+            } else if (t.lat != null && icon_distanceM(t.lat, t.lon, lat, lon) > 15) {
+                t.bearing = icon_bearingBetween(t.lat, t.lon, lat, lon);
+            }
+            t.lat = lat;
+            t.lon = lon;
+
+            // Desde cuándo está detenido: lo que observamos, o la fecha del último reporte si es anterior
+            if (isMoving) {
+                t.stoppedSince = null;
+            } else {
+                const since = t.stoppedSince || nowMs;
+                t.stoppedSince = isNaN(reportMs) ? since : Math.min(since, reportMs);
+            }
+
+            let state;
+            if (isNaN(reportMs) || nowMs - reportMs > ICON_INACTIVE_MS) state = 'inactive';
+            else if (isMoving) state = 'moving';
+            else if (nowMs - t.stoppedSince > ICON_HOME_MS) state = 'stoppedAtHome';
+            else state = 'stopped';
+
+            return { state, bearing: t.bearing || 0 };
         }
 
         geotab.addin.srfPositions = function (elt, service) {
@@ -819,33 +914,28 @@ render_pipeline
                     return;
                 }
 
+                const nowMs = Date.now();
                 devices.forEach(device => {
                     if (!device.lat || !device.lon) {
                         return;
                     }
 
-                    const isOnline = device.status === 'online';
-                    const isMoving = device.speed && device.speed > 0;
+                    const icon = icon_resolve(device, nowMs);
+                    device.mapIcon = icon.state;
+                    const center = { lat: device.lat, lng: device.lon };
 
-                    let fillColor, strokeColor;
-                    if (!isOnline) {
-                        fillColor = "#999999";
-                        strokeColor = "#333333";
-                    } else if (isMoving) {
-                        fillColor = "#00cc00";
-                        strokeColor = "#009900";
-                    } else {
-                        fillColor = "#ffcc00";
-                        strokeColor = "#ff9900";
+                    let marker;
+                    try {
+                        marker = service.canvas.marker(center, ICON_SIZE, ICON_SIZE, icon_getUri(icon.state, icon.bearing), 10);
+                    } catch (err) {
+                        // Respaldo: si el mapa no acepta el ícono, se dibuja el círculo de antes
+                        console.error("[MAP] No se pudo dibujar el ícono, uso círculo:", err);
+                        const color = icon.state === 'inactive' ? '#66788C' : '#0078D3';
+                        marker = service.canvas.circle(center, 12, 10)
+                            .change({ "fill": color, "fill-opacity": 0.9, "stroke": "#ffffff", "stroke-width": 2 });
                     }
 
-                    const circle = service.canvas.circle({ lat: device.lat, lng: device.lon }, 12, 10)
-                        .change({
-                            "fill": fillColor,
-                            "fill-opacity": 0.8,
-                            "stroke": strokeColor,
-                            "stroke-width": 2
-                        })
+                    marker
                         .attach("over", function (coords) {
                             const speed = device.speed ? Math.ceil(device.speed) : '0';
                             service.tooltip.showAt(
@@ -853,6 +943,7 @@ render_pipeline
                                 {
                                     main: device.name,
                                     secondary: [
+                                        ICON_LABELS[icon.state],
                                         getStatusDisplay(device.status),
                                         formatDeviceDate(device.lastSeenOnline),
                                         speed + " km/h"
@@ -865,7 +956,7 @@ render_pipeline
                             service.tooltip.hide();
                         });
 
-                    circles.push(circle);
+                    circles.push(marker);
                 });
             }
 
