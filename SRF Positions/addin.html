@@ -51,6 +51,36 @@ render_pipeline
         let gtbIdsAssigned = false;
         let GTB_DEVICES = {};
         let GTB_STATUSINFO = {};
+        // Conductores: User.id -> "Nombre Apellido"
+        let GTB_DRIVERS = {};
+        let drivers_lastLoadMs = 0;
+
+        async function drivers_load() {
+            try {
+                const api = ApiHelpers.getApi();
+                const users = await api.api.call("Get", {
+                    typeName: "User",
+                    search: { isDriver: true },
+                    resultsLimit: 50000
+                });
+                const map = {};
+                (users || []).forEach(u => {
+                    const full = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+                    map[u.id] = full || u.name || '';
+                });
+                GTB_DRIVERS = map;
+                drivers_lastLoadMs = Date.now();
+                (status_loggedInit ? dbg : initLog)(`[Drivers] ${Object.keys(map).length} conductores`);
+            } catch (err) {
+                console.error("[Drivers] Error cargando conductores:", err);
+            }
+        }
+
+        // DeviceStatusInfo.driver puede venir como { id } o como string ("UnknownDriverId")
+        function drivers_idOf(driver) {
+            const id = driver && typeof driver === 'object' ? driver.id : driver;
+            return id && id !== 'UnknownDriverId' && id !== 'NoDriverId' ? id : null;
+        }
 
         // StatusInfo PIPELINE
         // Se arranca desde el add-in, después de ApiHelpers.init(): antes la API todavía no existe
@@ -61,6 +91,7 @@ render_pipeline
         function status_start() {
             status_initPromise = (async () => {
                 try {
+                    await drivers_load();
                     await status_refreshData();
                     status_refreshIntervalId = setInterval(() => {
                         status_refreshData();
@@ -236,11 +267,19 @@ render_pipeline
                         communicates: device.isDeviceCommunicating,
                         // Posición del GO: se usa para centrar el mapa si la cámara no trae ubicación
                         lat: device.latitude,
-                        lon: device.longitude
+                        lon: device.longitude,
+                        // Último conductor asignado al GO
+                        driverId: drivers_idOf(device.driver)
                     };
                 }
 
                 GTB_STATUSINFO = devices;
+
+                // Conductor nuevo que no tenemos: recargar la lista (como mucho cada 10 min)
+                const missing = Object.values(devices).some(d => d.driverId && !(d.driverId in GTB_DRIVERS));
+                if (missing && Date.now() - drivers_lastLoadMs > 10 * 60 * 1000) {
+                    drivers_load();
+                }
                 (status_loggedInit ? dbg : initLog)(`[StatusInfo] ${Object.keys(devices).length} GO, ${Object.values(devices).filter(d => d.communicates === false).length} sin comunicar`);
                 status_loggedInit = true;
 
@@ -790,10 +829,141 @@ render_pipeline
             return { state, bearing: t.bearing || 0 };
         }
 
+        // ====== ETIQUETA "UNIDAD (CONDUCTOR)" ======
+        // Se dibuja como un SVG del doble de ancho centrado en el equipo: la mitad izquierda queda
+        // vacía (debajo del ícono) y el recuadro arranca a la derecha del ícono, como la etiqueta nativa.
+        const LABEL_FONT = "600 12px 'Segoe UI', Roboto, Arial, sans-serif";
+        const LABEL_HEIGHT = 22;
+        const LABEL_GAP = ICON_SIZE / 2 + 4;
+        const label_uriCache = {};
+        let label_ctx = null;
+
+        function label_textWidth(text) {
+            try {
+                if (!label_ctx) label_ctx = document.createElement('canvas').getContext('2d');
+                label_ctx.font = LABEL_FONT;
+                return Math.ceil(label_ctx.measureText(text).width);
+            } catch (e) {
+                return Math.ceil(text.length * 7);
+            }
+        }
+
+        function label_escape(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // Devuelve { uri, width, height } de la etiqueta
+        function label_get(text) {
+            if (label_uriCache[text]) return label_uriCache[text];
+            const boxW = label_textWidth(text) + 14;
+            const half = LABEL_GAP + boxW + 2;
+            const width = half * 2;
+            const h = LABEL_HEIGHT;
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">` +
+                `<rect x="${half + LABEL_GAP}" y="1" width="${boxW}" height="${h - 2}" rx="4" ry="4" fill="#ffffff" stroke="#c4cdd5" stroke-width="1"/>` +
+                `<text x="${half + LABEL_GAP + 7}" y="${h / 2 + 4}" font-family="'Segoe UI', Roboto, Arial, sans-serif" font-size="12" font-weight="600" fill="#25477b">${label_escape(text)}</text>` +
+                `</svg>`;
+            label_uriCache[text] = {
+                uri: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg),
+                width,
+                height: h
+            };
+            return label_uriCache[text];
+        }
+
+        // Nombre del conductor del GO asociado. Sin conductor (UnknownDriverId) o no encontrado:
+        // "Conductor desconocido". Sin GO asociado: null (no hay de dónde sacarlo).
+        function label_driverName(device) {
+            if (!device.goStatus) return null;
+            const id = device.goStatus.driverId;
+            return (id && GTB_DRIVERS[id]) || 'Conductor desconocido';
+        }
+
         geotab.addin.srfPositions = function (elt, service) {
             ApiHelpers.init(service);
-            let circles = [];
             let allDevices = [];
+
+            // ====== ANIMACIÓN DE POSICIÓN ======
+            // Al llegar una coordenada nueva, el ícono se desplaza desde donde está hacia ella
+            // durante ANIM_MS (el tiempo hasta el próximo redibujo). La API del mapa no permite
+            // mover un marker: en cada paso se dibuja el nuevo y se borra el anterior.
+            const ANIM_MS = 30000;          // igual al intervalo de renderAll()
+            const ANIM_STEP_MS = 1000;      // un paso por segundo
+            const ANIM_MAX_JUMP_M = 10000;  // saltos mayores (ej. vuelve tras horas sin datos): sin animación
+            // key (imei) -> { pos, from, to, startMs, look, items[] }
+            const anim_entries = {};
+
+            function anim_clearEntry(e) {
+                e.items.forEach(item => { try { item.remove(); } catch (err) { /* ya no existe */ } });
+                e.items = [];
+            }
+
+            // Dibuja ícono + etiqueta de un equipo en su posición actual (e.pos)
+            function anim_drawEntry(e) {
+                const { device, icon, labelText } = e.look;
+                const center = { lat: e.pos.lat, lng: e.pos.lng };
+                const items = [];
+
+                let marker;
+                try {
+                    marker = service.canvas.marker(center, ICON_SIZE, ICON_SIZE, icon_getUri(icon.state, icon.bearing), 10);
+                } catch (err) {
+                    // Respaldo: si el mapa no acepta el ícono, se dibuja un círculo
+                    console.error("[MAP] No se pudo dibujar el ícono, uso círculo:", err);
+                    const color = icon.state === 'inactive' ? '#66788C' : '#0078D3';
+                    marker = service.canvas.circle(center, 12, 10)
+                        .change({ "fill": color, "fill-opacity": 0.9, "stroke": "#ffffff", "stroke-width": 2 });
+                }
+
+                marker
+                    .attach("over", function (coords) {
+                        const speed = device.speed ? Math.ceil(device.speed) : '0';
+                        service.tooltip.showAt(
+                            coords,
+                            {
+                                main: device.name,
+                                secondary: [
+                                    ICON_LABELS[icon.state],
+                                    getStatusDisplay(device.status),
+                                    formatDeviceDate(device.lastSeenOnline),
+                                    speed + " km/h"
+                                ]
+                            },
+                            1
+                        );
+                    })
+                    .attach("out", function () {
+                        service.tooltip.hide();
+                    });
+                items.push(marker);
+
+                // Etiqueta "Unidad (Conductor)" a la derecha del ícono, por debajo de él
+                try {
+                    const label = label_get(labelText);
+                    items.push(service.canvas.marker(center, label.width, label.height, label.uri, 9));
+                } catch (err) {
+                    dbg("[MAP] No se pudo dibujar la etiqueta:", err);
+                }
+
+                // Primero se dibuja lo nuevo y después se borra lo viejo: evita el parpadeo
+                anim_clearEntry(e);
+                e.items = items;
+            }
+
+            // Avanza las animaciones en curso
+            function anim_tick() {
+                const now = Date.now();
+                Object.values(anim_entries).forEach(e => {
+                    if (e.pos.lat === e.to.lat && e.pos.lng === e.to.lng) return;
+                    const p = Math.min(1, (now - e.startMs) / ANIM_MS);
+                    e.pos = p >= 1 ? e.to : {
+                        lat: e.from.lat + (e.to.lat - e.from.lat) * p,
+                        lng: e.from.lng + (e.to.lng - e.from.lng) * p
+                    };
+                    anim_drawEntry(e);
+                });
+            }
+            setInterval(anim_tick, ANIM_STEP_MS);
             let currentFilter = 'all';
             let currentSearch = '';
 
@@ -828,7 +998,6 @@ render_pipeline
             }
 
             function drawDevices(devices) {
-                clearDevices();
 //--------------------------------------------------- JM ----------------------------------------------------------------
 //devices
                 let combinedDevices = devices;
@@ -910,59 +1079,47 @@ render_pipeline
                 })));
 
 //--------------------------------------------------- JM ----------------------------------------------------------------
-                if (!Array.isArray(devices) || devices.length === 0) {
-                    return;
-                }
-
+                // Se reconcilia contra lo ya dibujado: los equipos que siguen se animan hacia
+                // su nueva posición; los nuevos aparecen; los que ya no están se borran.
                 const nowMs = Date.now();
+                const seen = new Set();
                 devices.forEach(device => {
                     if (!device.lat || !device.lon) {
                         return;
                     }
 
+                    const key = device.imei || device.name;
+                    seen.add(key);
                     const icon = icon_resolve(device, nowMs);
                     device.mapIcon = icon.state;
-                    const center = { lat: device.lat, lng: device.lon };
+                    const target = { lat: parseFloat(device.lat), lng: parseFloat(device.lon) };
+                    const driverName = label_driverName(device);
 
-                    let marker;
-                    try {
-                        marker = service.canvas.marker(center, ICON_SIZE, ICON_SIZE, icon_getUri(icon.state, icon.bearing), 10);
-                    } catch (err) {
-                        // Respaldo: si el mapa no acepta el ícono, se dibuja el círculo de antes
-                        console.error("[MAP] No se pudo dibujar el ícono, uso círculo:", err);
-                        const color = icon.state === 'inactive' ? '#66788C' : '#0078D3';
-                        marker = service.canvas.circle(center, 12, 10)
-                            .change({ "fill": color, "fill-opacity": 0.9, "stroke": "#ffffff", "stroke-width": 2 });
+                    let e = anim_entries[key];
+                    if (!e) {
+                        e = anim_entries[key] = { pos: target, from: target, to: target, startMs: nowMs, items: [] };
+                    } else if (e.to.lat !== target.lat || e.to.lng !== target.lng) {
+                        const far = icon_distanceM(e.pos.lat, e.pos.lng, target.lat, target.lng) > ANIM_MAX_JUMP_M;
+                        e.from = far ? target : e.pos;
+                        e.to = target;
+                        e.startMs = nowMs;
+                        if (far) e.pos = target;
                     }
-
-                    marker
-                        .attach("over", function (coords) {
-                            const speed = device.speed ? Math.ceil(device.speed) : '0';
-                            service.tooltip.showAt(
-                                coords,
-                                {
-                                    main: device.name,
-                                    secondary: [
-                                        ICON_LABELS[icon.state],
-                                        getStatusDisplay(device.status),
-                                        formatDeviceDate(device.lastSeenOnline),
-                                        speed + " km/h"
-                                    ]
-                                },
-                                1
-                            );
-                        })
-                        .attach("out", function () {
-                            service.tooltip.hide();
-                        });
-
-                    circles.push(marker);
+                    e.look = {
+                        device,
+                        icon,
+                        labelText: driverName ? `${device.name} (${driverName})` : device.name
+                    };
+                    // Redibujo con el estado actual (ícono, rumbo, etiqueta); la posición la avanza anim_tick
+                    anim_drawEntry(e);
                 });
-            }
 
-            function clearDevices() {
-                circles.forEach(circle => circle.remove());
-                circles = [];
+                Object.keys(anim_entries).forEach(key => {
+                    if (!seen.has(key)) {
+                        anim_clearEntry(anim_entries[key]);
+                        delete anim_entries[key];
+                    }
+                });
             }
 
             function groupDevicesByStatus(devices) {
@@ -1082,6 +1239,7 @@ render_pipeline
                                 <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span>
                                 <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; background:${sourceBadgeColor}">${device.source || 'SRF'}</span>
                                 <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; letter-spacing:0.3px; ${mapBadge.style}">${mapBadge.text}</span><br>
+                                ${label_driverName(device) ? `<strong style="color:#374151; font-weight:600;">Conductor:</strong> ${label_escape(label_driverName(device))}<br>` : ''}
                                 <strong style="color:#374151; font-weight:600;">Última comunicación:</strong> ${dateFormatted}<br>
                                 <strong style="color:#374151; font-weight:600;">Velocidad de Cámara:</strong> ${speed} km/h<br>
                                 <span style="font-size:11px; ${locationStyle}">${locationStatus}</span>
