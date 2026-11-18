@@ -1,0 +1,1683 @@
+'''gtb-pipeline
+	api_helpers (TODAS LAS PIPELINES deben esperar a estos helpers)
+		getsession (usaremos las credenciales en mkp pipeline)
+		devices (one time)
+			devicemappings (one time)
+			(agregar partnerDeviceId (lo llamaremos "imei") a devices, vincular por serialNumber y associatedDeviceSerialNumber respectivamente)
+			devicestatusinfo (60s interval)
+			(agregar a devices "IsDeviceCommunicating" que viene en devicestatusinfo)
+
+mkp_pipeline
+	traemos devices (one time)
+	mediaservices, a cada imei de devices (one time, luego 30s interval para los que NO DIERON ERROR. Si todos dieron error, DETENER INDEFINIDAMENTE)
+
+srf_pipeline
+	gettokenfromgithub (6h interval)
+	getunion.csv (6h interval, si no hay id de SRF se DETIENE EL PIPELINE INDEFINIDAMENTE)
+	srf_getDevicesByOrgId (10s interval, consultamos SOLO cuando hallamos id SRF)
+
+fcs_pipeline
+	reusar devicemappings de mkp (mappings cuyo partnerDeviceId empiece con "G")
+	para cada uno, obtener LogRecord via api.multiCall (30s interval)
+
+render_pipeline
+	traemos mkp, srf y fcs como "combined" (Interval 10s, Tomamos los datos SOLO SI LOS PIPELINES ESTAN CORRIENDO)
+		unificamos los datos en (lat, lon, imei, lastreport) (null para los vacios)
+	filtramos por "IsDeviceCommunicating" = false (GTB_STATUSINFO via gtbId)
+	vinculamos los devices con combined por imei
+	renderizamos solo aquellos devices con lat y lon <> null
+
+```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Cameras Positions Map Add-in</title>
+</head>
+<body>
+    <div id="addin-root"></div>
+
+    <script>
+        // Logs informativos y de diagnóstico: apagados. Poner en true para depurar.
+        // Los errores reales (console.error) se loguean siempre.
+        const DEBUG = true;
+        const dbg = (...args) => { if (DEBUG) console.log(...args); };
+        // Mensajes de inicialización (una vez al cargar el add-in): siempre visibles
+        const initLog = (...args) => console.log(...args);
+        let status_loggedInit = false;
+
+        let commitMessage = "";
+
+        let gtbIdsAssigned = false;
+        let GTB_DEVICES = {};
+        let GTB_STATUSINFO = {};
+        // Conductores: User.id -> "Nombre Apellido"
+        let GTB_DRIVERS = {};
+        let drivers_lastLoadMs = 0;
+
+        async function drivers_load() {
+            try {
+                const api = ApiHelpers.getApi();
+                const users = await api.api.call("Get", {
+                    typeName: "User",
+                    search: { isDriver: true },
+                    resultsLimit: 50000
+                });
+                const map = {};
+                (users || []).forEach(u => {
+                    const full = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+                    map[u.id] = full || u.name || '';
+                });
+                GTB_DRIVERS = map;
+                drivers_lastLoadMs = Date.now();
+                (status_loggedInit ? dbg : initLog)(`[Drivers] ${Object.keys(map).length} conductores`);
+            } catch (err) {
+                console.error("[Drivers] Error cargando conductores:", err);
+            }
+        }
+
+        // DeviceStatusInfo.driver puede venir como { id } o como string ("UnknownDriverId")
+        function drivers_idOf(driver) {
+            const id = driver && typeof driver === 'object' ? driver.id : driver;
+            return id && id !== 'UnknownDriverId' && id !== 'NoDriverId' ? id : null;
+        }
+
+        // StatusInfo PIPELINE
+        // Se arranca desde el add-in, después de ApiHelpers.init(): antes la API todavía no existe
+        // y la primera carga fallaba, dejando GTB_STATUSINFO vacío en el primer render.
+        let status_initPromise = null;
+        let status_refreshIntervalId = null;
+        // Lo asigna el add-in (renderAll) una vez hecho el primer dibujo
+        let status_onCommsChange = null;
+
+        function status_start() {
+            status_initPromise = (async () => {
+                try {
+                    await drivers_load();
+                    await status_refreshData();
+                    status_refreshIntervalId = setInterval(() => {
+                        status_refreshData();
+                    }, 30000);
+                } catch (err) {
+                    console.error("[StatusInfo] Initialization failed:", err);
+                }
+            })();
+            return status_initPromise;
+        }
+
+        async function getLastCommitMessage() {
+            try {
+                const response = await fetch('https://api.github.com/repos/jmcesetti/geotabaddins/commits?per_page=1');
+                const commits = await response.json();
+                if (commits.length > 0) {
+                    commitMessage = commits[0].commit.message.split('\n')[0];
+                }
+            } catch (err) {
+                dbg("[debug] Could not fetch commit message:", err);
+            }
+        }
+
+        // Gist donde SRF Positions.py publica el token y el CSV de organizaciones
+        const SRF_GIST_RAW = 'https://gist.githubusercontent.com/jmcesetti/29562b1be6432ccd7bf143ad8903abc1/raw';
+
+        let srf_token = null;
+        let srf_isTokenValid = true;
+        let srf_tokenCheckTimeoutId = null;
+        let srf_regularRefreshIntervalId = null;
+        const srf_tokenRetryDelays = [60000, 180000, 300000, 600000];
+        let srf_tokenRetryIndex = 0;
+        let mkp_initPromise = null;
+
+        // ====== FCS PIPELINE - variables ======
+        let fcs_allDevices = [];
+        let fcs_refreshIntervalId = null;
+        let render_refreshIntervalId = null;
+        let fcs_initPromise = null;
+
+        const ApiHelpers = (() => {
+            let _api = null;
+            let _session = null;
+            let _sessionPromise = null;
+
+            function init(api) {
+                _api = api;
+                _sessionPromise = _api.api.getSession().then(session => {
+                    _session = session;
+                    return session;
+                }).catch(err => {
+                    console.error("[Session] Error loading session:", err.message);
+                    throw err;
+                });
+            }
+
+            function getApi() {
+                return _api;
+            }
+
+            function getSession() {
+                return _session;
+            }
+
+            function getSessionPromise() {
+                return _sessionPromise;
+            }
+
+            return { init, getApi, getSession, getSessionPromise };
+        })();
+
+        // ====== SURFSIGHT PIPELINE ======
+        async function srf_fetchTokenFromGitHub() {
+            try {
+                const response = await fetch(`${SRF_GIST_RAW}/srf_tok.txt?t=${Date.now()}`, { cache: 'no-store' });
+                if (!response.ok) throw new Error(`Failed to fetch token: ${response.statusText}`);
+                srf_token = (await response.text()).trim();
+                return srf_token;
+            } catch (err) {
+                console.error("[SRF]", err.message);
+                throw err;
+            }
+        }
+
+        async function srf_getUnionsFromGitHub() {
+            try {
+                const url = `${SRF_GIST_RAW}/unions.csv?t=${Date.now()}`;
+                const response = await fetch(url, { cache: 'no-store' });
+                if (!response.ok) throw new Error(`Failed to fetch unions.csv: ${response.status}`);
+                const csv = await response.text();
+
+                const lines = csv.trim().split('\n');
+                const headers = lines[0].split(',').map(h => h.trim());
+                const unions = [];
+
+                for (let i = 1; i < lines.length; i++) {
+                    const values = lines[i].split(',').map(v => v.trim());
+                    const row = {};
+                    headers.forEach((header, index) => {
+                        row[header] = values[index];
+                    });
+                    unions.push(row);
+                }
+
+                return unions;
+            } catch (err) {
+                console.error("[SRF]", err.message);
+                throw err;
+            }
+        }
+
+        async function srf_getOrgIdsFromGeotab() {
+            try {
+                const session = await ApiHelpers.getSessionPromise();
+                const unions = await srf_getUnionsFromGitHub();
+                const database = session.database;
+                var devices = {};
+                try {
+                    // dbg("------------------- [GTB] -------------------");
+                    const api = ApiHelpers.getApi();
+                    const devices = {};
+
+                    const raw_devices = await api.api.call("Get", {
+                        typeName: "Device"
+                    });
+                    for (const device of raw_devices) {
+                        devices[device.id] = {
+                            id: device.id,
+                            licensePlate: device.licensePlate,
+                            serialNumber: device.serialNumber,
+                            name: device.name
+                        };
+                    }
+                } catch (err) {
+                    console.error("[GTB] Error:", err);
+                }
+
+                const matchingUnions = unions.filter(u => u.geotab_db && u.geotab_db.toLowerCase() === database.toLowerCase());
+
+                const allSrfIds = matchingUnions.map(u => u.id);
+
+                const orgIdsFromCsv = allSrfIds.filter(id => id && id.toLowerCase() !== 'null');
+
+                if (orgIdsFromCsv.length === 0) {
+                    throw new Error(`No matching OrgIds found in unions.csv for database: ${database}`);
+                }
+
+                return { database, orgIdsFromCsv, allSrfIds };
+            } catch (err) {
+                console.error("[SRF]", err.message);
+                throw err;
+            }
+        }
+
+        async function status_refreshData() {
+            try {
+
+                const api = ApiHelpers.getApi();
+                if (!api) {
+                    dbg("[StatusInfo] API no inicializada todavía");
+                    return;
+                }
+
+                const raw_devices = await api.api.call("Get", {
+                    typeName: "DeviceStatusInfo"
+                });
+                const devices = {};
+
+                for (const device of raw_devices) {
+                    devices[device.device.id] = {
+                        bearing: device.bearing,
+                        dateTime: device.dateTime,
+                        communicates: device.isDeviceCommunicating,
+                        // Posición del GO: se usa para centrar el mapa si la cámara no trae ubicación
+                        lat: device.latitude,
+                        lon: device.longitude,
+                        speed: device.speed,
+                        // Último conductor asignado al GO
+                        driverId: drivers_idOf(device.driver)
+                    };
+                }
+
+                // ¿Algún GO cambió de "comunica" a "no comunica" o al revés?
+                const prev = GTB_STATUSINFO;
+                const commsChanged = Object.keys(devices).some(id =>
+                    prev[id] && prev[id].communicates !== devices[id].communicates);
+
+                GTB_STATUSINFO = devices;
+
+                // Redibujo inmediato: el GO que vuelve a comunicar se oculta sin esperar al ciclo de 30 s
+                if (commsChanged && status_onCommsChange) {
+                    dbg("[StatusInfo] Cambió la comunicación de algún GO: redibujo");
+                    status_onCommsChange();
+                }
+
+                // Conductor nuevo que no tenemos: recargar la lista (como mucho cada 10 min)
+                const missing = Object.values(devices).some(d => d.driverId && !(d.driverId in GTB_DRIVERS));
+                if (missing && Date.now() - drivers_lastLoadMs > 10 * 60 * 1000) {
+                    drivers_load();
+                }
+                (status_loggedInit ? dbg : initLog)(`[StatusInfo] ${Object.keys(devices).length} GO, ${Object.values(devices).filter(d => d.communicates === false).length} sin comunicar`);
+                status_loggedInit = true;
+
+            } catch (err) {
+                console.error("[GTB] Error:", err);
+            }
+        }
+
+        async function srf_getDevicesByOrgId(orgId) {
+            if (!srf_token) await srf_fetchTokenFromGitHub();
+            try {
+                const url = `https://api-prod.surfsight.net/v2/organizations/${orgId}/devices`;
+
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `Bearer ${srf_token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.status === 401) {
+                    srf_isTokenValid = false;
+                    console.error("[SRF] Token inválido");
+                    throw new Error("TokenInvalid");
+                }
+
+                if (!response.ok) throw new Error(`Failed to fetch devices: ${response.status} ${response.statusText}`);
+                const devicesData = await response.json();
+
+                const devices = devicesData.data || (Array.isArray(devicesData) ? devicesData : []);
+                return devices;
+            } catch (err) {
+                console.error("[SRF]", err.message);
+                throw err;
+            }
+        }
+
+        async function srf_checkTokenValidity() {
+            try {
+                await srf_fetchTokenFromGitHub();
+                const testUrl = 'https://api-prod.surfsight.net/v2/organizations/test';
+                const response = await fetch(testUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${srf_token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                return response.status !== 401;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function srf_scheduleTokenRetry() {
+            if (srf_tokenCheckTimeoutId) clearTimeout(srf_tokenCheckTimeoutId);
+
+            const delay = srf_tokenRetryDelays[Math.min(srf_tokenRetryIndex, srf_tokenRetryDelays.length - 1)];
+            const delayMin = delay / 60000;
+            dbg(`[SRF] Reintentando token en ${delayMin}m...`);
+
+            srf_tokenCheckTimeoutId = setTimeout(async () => {
+                const isValid = await srf_checkTokenValidity();
+                if (isValid) {
+                    srf_isTokenValid = true;
+                    srf_tokenRetryIndex = 0;
+                    srf_tokenCheckTimeoutId = null;
+                    // El intervalo de SRF retoma la consulta solo (chequea srf_isTokenValid)
+                    // y renderAll() lo dibuja en el próximo ciclo de 30s.
+                    dbg("[SRF] Token válido nuevamente");
+                } else {
+                    srf_tokenRetryIndex++;
+                    srf_scheduleTokenRetry();
+                }
+            }, delay);
+        }
+
+        async function srf_getSurfsightDevices(orgIdsData) {
+            try {
+                const devicePromises = orgIdsData.orgIdsFromCsv.map(orgId => srf_getDevicesByOrgId(orgId));
+                const allDevicesArrays = await Promise.all(devicePromises);
+                const allDevices = allDevicesArrays.flat();
+                return allDevices;
+            } catch (err) {
+                console.error("[ERR] In getSurfsightDevices:", err);
+                throw err;
+            }
+        }
+
+        // ====== MARKETPLACE PIPELINE ======
+        let mkp_deviceMappings = [];
+        let mkp_validDevices = [];
+        let mkp_snMap = {};
+        let mkp_allDevices = [];
+        let mkp_refreshIntervalId = null;
+
+        async function mkp_getDeviceMappings() {
+            try {
+                const session = await ApiHelpers.getSessionPromise();
+                const response = await fetch("https://media-services.geotab.com/api/DeviceMappings", {
+                    method: 'GET',
+                    headers: {
+                        'x-mygeotab-database': encodeURIComponent(session.database),
+                        'x-mygeotab-path': session.domain,
+                        'x-mygeotab-sessionid': session.sessionId,
+                        'x-mygeotab-username': session.userName
+                    }
+                });
+
+                if (!response.ok) throw new Error(`DeviceMappings error: ${response.status}`);
+
+                const data = await response.json();
+                const items = Array.isArray(data) ? data : (data.data || []);
+
+                mkp_deviceMappings = items
+                    .filter(item => item.associatedDeviceSerialNumber && item.partnerDeviceId)
+                    .map(item => ({
+                        sn: item.associatedDeviceSerialNumber,
+                        imei: item.partnerDeviceId
+                    }));
+
+                // Asociación cámara -> GO para TODOS los mappings (SRF la usa para encontrar su GO).
+                // Antes se armaba solo con las cámaras que respondían en OrganizationDevices/{imei},
+                // y si ninguna respondía, ninguna cámara SRF quedaba asociada a su GO.
+                mkp_snMap = {};
+                mkp_deviceMappings.forEach(m => { mkp_snMap[m.imei] = m.sn; });
+
+                initLog(`[MKP] DeviceMappings: ${items.length} recibidos, ${mkp_deviceMappings.length} con cámara+GO, ` +
+                    `${mkp_deviceMappings.filter(m => m.imei.startsWith('G')).length} Focus (G...)`);
+                return mkp_deviceMappings;
+            } catch (err) {
+                console.error("[ERR] mkp_getDeviceMappings:", err);
+                return [];
+            }
+        }
+
+        async function mkp_fetchDeviceByImei(imei) {
+            try {
+                const url = `https://media-services.geotab.com/api/Surfsight/OrganizationDevices/${imei}`;
+                const session = await ApiHelpers.getSessionPromise();
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'x-mygeotab-database': encodeURIComponent(session.database),
+                        'x-mygeotab-path': session.domain,
+                        'x-mygeotab-sessionid': session.sessionId,
+                        'x-mygeotab-username': session.userName
+                    }
+                });
+
+                if (!response.ok) {
+                    return null;
+                }
+
+                const data = await response.json();
+                return data;
+            } catch (err) {
+                dbg(`[MKP] fetchMarketplaceDeviceByImei failed:`, err.message);
+                return null;
+            }
+        }
+
+        async function mkp_refreshData() {
+            if (mkp_validDevices.length === 0) return;
+            const results = await Promise.all(
+                mkp_validDevices.map(device =>
+                    mkp_fetchDeviceByImei(device.imei).then(data => ({
+                        sn: device.sn,
+                        imei: device.imei,
+                        data
+                    }))
+                )
+            );
+            mkp_allDevices = results.filter(r => r.data).map(r => ({
+                sn: r.sn,
+                imei: r.imei,
+                name: r.data.deviceModel || `MKP-${r.imei}`,
+                lat: r.data.lat,
+                lon: r.data.lon,
+                speed: Math.round(r.data.speed),
+                status: r.data.status,
+                lastSeenOnline: r.data.lastSeenOnline,
+                source: 'MKP'
+            }));
+            dbg(`[MKP] Refresh: ${mkp_allDevices.length}/${results.length} OK`);
+            return mkp_allDevices;
+        }
+
+        async function mkp_initValidDevices() {
+            if (mkp_deviceMappings.length === 0) return;
+            const results = await Promise.all(
+                mkp_deviceMappings.map(mapping =>
+                    mkp_fetchDeviceByImei(mapping.imei).then(data => ({
+                        sn: mapping.sn,
+                        imei: mapping.imei,
+                        data
+                    }))
+                )
+            );
+            mkp_validDevices = results.filter(r => r.data).map(r => ({ sn: r.sn, imei: r.imei }));
+            // mkp_snMap ya se armó en mkp_getDeviceMappings con todos los mappings
+            initLog(`[MKP] OrganizationDevices: ${mkp_validDevices.length}/${results.length} cámaras respondieron`);
+            mkp_allDevices = results.filter(r => r.data).map(r => ({
+                sn: r.sn,
+                imei: r.imei,
+                name: r.data.deviceModel || `MKP-${r.imei}`,
+                lat: r.data.lat,
+                lon: r.data.lon,
+                speed: Math.round(r.data.speed),
+                status: r.data.status,
+                lastSeenOnline: r.data.lastSeenOnline,
+                source: 'MKP'
+            }));
+            return results;
+        }
+
+        // Consulta manual de DeviceMappings (botón del panel): loguea la respuesta completa
+        async function mkp_testRequest() {
+            try {
+                const session = await ApiHelpers.getSessionPromise();
+                const response = await fetch("https://media-services.geotab.com/api/DeviceMappings", {
+                    method: 'GET',
+                    headers: {
+                        'x-mygeotab-database': encodeURIComponent(session.database),
+                        'x-mygeotab-path': session.domain,
+                        'x-mygeotab-sessionid': session.sessionId,
+                        'x-mygeotab-username': session.userName
+                    }
+                });
+
+                const data = await response.json();
+                console.log(`[TEST] DeviceMappings (HTTP ${response.status}):`, data);
+                return { success: response.ok, data };
+            } catch (err) {
+                console.error("[TEST] DeviceMappings ERROR:", err.message);
+                return { success: false, error: err.message };
+            }
+        }
+
+        // ====== FCS (FOCUS) PIPELINE ======
+        // Obtiene el mapa serialNumber->nombre de los Device de Geotab.
+        // Se usa para nombrar las cámaras FCS por el nombre del GO asociado.
+        let fcs_gtbDeviceNameBySn = {};
+
+        async function fcs_loadGtbDeviceNames() {
+            try {
+                const api = ApiHelpers.getApi();
+                const raw_devices = await api.api.call("Get", { typeName: "Device" });
+                fcs_gtbDeviceNameBySn = {};
+                GTB_DEVICES = {};
+                for (const device of raw_devices) {
+                    fcs_gtbDeviceNameBySn[device.serialNumber] = device.name;
+                    GTB_DEVICES[device.id] = {
+                        id: device.id,
+                        sn: device.serialNumber,
+                        name: device.name,
+                        licensePlate: device.licensePlate
+                    };
+                }
+                initLog(`[FCS] Cargados ${raw_devices.length} dispositivos GTB`);
+            } catch (err) {
+                console.error("[FCS] Error cargando nombres de dispositivos GTB:", err);
+            }
+        }
+
+        // Obtiene los LogRecord para una lista de { deviceId } (Device de Geotab de cada cámara Focus).
+        // Usa api.multiCall para batchear. Si el multiCall falla, intenta de a uno.
+        async function fcs_fetchLogRecords(focusMappings) {
+            const api = ApiHelpers.getApi();
+            const now = new Date().toISOString();
+
+            // Construir llamadas multiCall: una por cámara
+            const calls = focusMappings.map(m => [
+                "Get",
+                {
+                    typeName: "LogRecord",
+                    search: {
+                        deviceSearch: { id: m.deviceId },
+                        fromDate: now,
+                        toDate: now
+                    },
+                    resultsLimit: 1
+                }
+            ]);
+
+            let results = null;
+
+            try {
+                results = await api.api.multiCall(calls);
+                dbg(`[FCS] multiCall OK: ${results.length} respuestas`);
+            } catch (err) {
+                // Si multiCall falla entero, intentar de a uno
+                dbg("[FCS] multiCall falló, intentando de a uno:", err.message);
+                results = [];
+                for (const call of calls) {
+                    try {
+                        const r = await api.api.call(call[0], call[1]);
+                        results.push(r);
+                    } catch (e) {
+                        dbg(`[FCS] Error en call individual para ${call[1].search.deviceSearch.id}:`, e.message);
+                        results.push([]);
+                    }
+                }
+            }
+
+            // Si algún device no devolvió registros, fallback a DeviceStatusInfo (última posición conocida).
+            // No se usa LogRecord con fromDate sin toDate: el orden es ascendente y resultsLimit:1 traería el más viejo.
+            // DeviceStatusInfo trae latitude/longitude/speed/dateTime con los mismos nombres que LogRecord.
+            const fallbackCalls = [];
+            const fallbackIndices = [];
+
+            results.forEach((res, idx) => {
+                if (!Array.isArray(res) || res.length === 0) {
+                    fallbackCalls.push([
+                        "Get",
+                        {
+                            typeName: "DeviceStatusInfo",
+                            search: {
+                                deviceSearch: { id: focusMappings[idx].deviceId }
+                            },
+                            resultsLimit: 1
+                        }
+                    ]);
+                    fallbackIndices.push(idx);
+                }
+            });
+
+            if (fallbackCalls.length > 0) {
+                let fallbackResults = null;
+                try {
+                    fallbackResults = await api.api.multiCall(fallbackCalls);
+                    dbg(`[FCS] Fallback multiCall OK: ${fallbackResults.length} respuestas para ${fallbackCalls.length} devices`);
+                } catch (err) {
+                    dbg("[FCS] Fallback multiCall falló, intentando de a uno:", err.message);
+                    fallbackResults = [];
+                    for (const call of fallbackCalls) {
+                        try {
+                            const r = await api.api.call(call[0], call[1]);
+                            fallbackResults.push(r);
+                        } catch (e) {
+                            dbg(`[FCS] Error en fallback individual:`, e.message);
+                            fallbackResults.push([]);
+                        }
+                    }
+                }
+                fallbackIndices.forEach((origIdx, i) => {
+                    if (fallbackResults[i] && fallbackResults[i].length > 0) {
+                        results[origIdx] = fallbackResults[i];
+                    }
+                });
+            }
+
+            return results;
+        }
+
+        // Lista de cámaras Focus (Get Camera): se carga UNA vez al iniciar el add-in.
+        // Cada Camera trae cameraSerialNumber (cámara) y deviceSerialNumber (GO asociado).
+        let fcs_cameras = [];
+
+        async function fcs_loadCameras() {
+            const api = ApiHelpers.getApi();
+            const cameras = await api.api.call("Get", { typeName: "Camera" });
+            const now = new Date();
+            fcs_cameras = (cameras || []).filter(c =>
+                c.cameraSerialNumber &&
+                (c.vendor === 'Geotab' || c.cameraSerialNumber.startsWith('G')) &&
+                (!c.activeTo || new Date(c.activeTo) > now)
+            );
+            initLog(`[FCS] Camera: ${(cameras || []).length} recibidas, ${fcs_cameras.length} Focus activas`);
+            return fcs_cameras;
+        }
+
+        // Estado de las cámaras (Get CameraStatus) indexado por camera.id
+        async function fcs_fetchCameraStatus() {
+            const api = ApiHelpers.getApi();
+            const statuses = await api.api.call("Get", { typeName: "CameraStatus" });
+            const byCameraId = {};
+            (statuses || []).forEach(s => {
+                if (s.camera && s.camera.id) byCameraId[s.camera.id] = s;
+            });
+            return byCameraId;
+        }
+
+        // CameraStatus.status ("Online", "Offline", ...) -> estados del panel
+        function fcs_mapCameraStatus(status) {
+            const s = String(status || '').toLowerCase();
+            if (s === 'online') return 'online';
+            if (s === 'offline' || s === '') return 'offline';
+            return 'standby';
+        }
+
+        // Cada 30s: CameraStatus + LogRecord, sobre la lista de Camera cargada al inicio
+        async function fcs_refreshData() {
+            if (fcs_cameras.length === 0) {
+                fcs_allDevices = [];
+                return fcs_allDevices;
+            }
+
+            // Device de Geotab para pedir LogRecord: el de la cámara si existe como Device;
+            // si no, el GO asociado (deviceSerialNumber).
+            const snToId = {};
+            Object.values(GTB_DEVICES).forEach(d => { if (d.sn) snToId[d.sn] = d.id; });
+            const focusCameras = fcs_cameras.map(c => ({
+                camera: c,
+                deviceId: snToId[c.cameraSerialNumber] || snToId[c.deviceSerialNumber] || null
+            }));
+            const withDevice = focusCameras.filter(fc => fc.deviceId);
+            dbg(`[FCS] ${withDevice.length}/${focusCameras.length} cámaras con Device para LogRecord`);
+
+            let statusByCameraId = {};
+            try {
+                statusByCameraId = await fcs_fetchCameraStatus();
+            } catch (err) {
+                console.error("[FCS] Error obteniendo CameraStatus:", err);
+            }
+
+            let logResults = [];
+            if (withDevice.length > 0) {
+                try {
+                    logResults = await fcs_fetchLogRecords(withDevice);
+                } catch (err) {
+                    console.error("[FCS] Error obteniendo LogRecords:", err);
+                    logResults = [];
+                }
+            }
+            const recordByCameraId = {};
+            withDevice.forEach((fc, idx) => {
+                const records = Array.isArray(logResults[idx]) ? logResults[idx] : [];
+                if (records[0]) recordByCameraId[fc.camera.id] = records[0];
+            });
+
+            fcs_allDevices = focusCameras.map(({ camera }) => {
+                const record = recordByCameraId[camera.id] || null;
+                const camStatus = statusByCameraId[camera.id] || null;
+
+                // Nombre: el del GO asociado; si no existe, el serial de la cámara
+                const name = fcs_gtbDeviceNameBySn[camera.deviceSerialNumber] || camera.cameraSerialNumber;
+
+                return {
+                    sn: camera.deviceSerialNumber,
+                    imei: camera.cameraSerialNumber,
+                    name: name,
+                    lat: record ? record.latitude : null,
+                    lon: record ? record.longitude : null,
+                    speed: record ? Math.round(record.speed || 0) : 0,
+                    // Solo DeviceStatusInfo (fallback) trae rumbo; LogRecord no
+                    bearing: record && typeof record.bearing === 'number' ? record.bearing : null,
+                    status: camStatus ? fcs_mapCameraStatus(camStatus.status) : (record ? 'online' : 'offline'),
+                    lastSeenOnline: camStatus ? camStatus.lastUpdated : (record ? record.dateTime : null),
+                    source: 'FCS'
+                };
+            });
+
+            dbg(`[FCS] Refresh: ${fcs_allDevices.filter(d => d.lat && d.lon).length}/${fcs_allDevices.length} con ubicación`);
+            return fcs_allDevices;
+        }
+
+        // ====== ICONOS DEL MAPA ======
+        // Reemplazan a los círculos de color. Estados:
+        //   inactive      -> sin reportar hace más de 24 h
+        //   moving        -> velocidad > 0, flecha orientada según el rumbo
+        //   stoppedAtHome -> detenido hace más de 30 min
+        //   stopped       -> detenido hace menos de 30 min
+        const ICON_SIZE = 32;
+        const ICON_INACTIVE_MS = 24 * 60 * 60 * 1000;
+        const ICON_HOME_MS = 30 * 60 * 1000;
+        const ICON_LABELS = {
+            inactive: 'Sin reportar hace más de 24 h',
+            moving: 'En movimiento',
+            stoppedAtHome: 'Detenido hace más de 30 min',
+            stopped: 'Detenido'
+        };
+
+        // SVG de cada estado. {ROT} se reemplaza por el rumbo (grados, sentido horario desde el norte).
+        const ICON_SVG = {
+            inactive: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#66788C" stroke="#ffffff" stroke-width="2"/><path d="M9.41085 4.07636c.48125.33833.86045.80266 1.09545 1.34167.0981.20766.3133.33366.542.31791.7554-.03092 1.4741.32958 1.9016.95317.2555.3675.3891.80617.3833 1.25358.0198.54483-.1768 1.07567-.5472 1.47642-.2187.2275-.2158.58799.007.81139.231.2281.6032.2252.8307-.0058.0046-.0047.0093-.0099.014-.0146.5547-.58799.8633-1.36674.8622-2.17524.0548-1.77334-1.2775-3.28359-3.0433-3.45159-.0461-.00466-.0875-.03033-.1114-.07-.8138-1.34808-2.27093-2.17408-3.84535-2.17991-.44392 0-.88492.0665-1.309.19775-.37975.11666-.47075.49291-.21992.875.13417.21058.3955.30041.63117.21758.95783-.2625 1.98217-.09742 2.80875.45267M3.30627 10.1448c-.46259-.0088-.90942-.17328-1.267-.46669-.26425-.28117-.39959-.65975-.37275-1.04475.00058-.833.6755-1.5085 1.5085-1.50909.105 0 .20941.0105.31208.0315.16567.03559.33892-.0035.47308-.10733.13475-.10325.21759-.25958.2275-.42875.00817-.13067.01109-.29517.00875-.42292-.00525-.29166.01284-.42758-.15225-.59266-.21525-.21583-.56466-.21584-.7805-.00059-.07525.07525-.12716.17034-.14933.27417v.01108c-.00817.04025-.04258.07001-.084.07176-.89483.05249-1.70625.54425-2.1665 1.31366-.256083.43109-.382666.92692-.364 1.428-.014.6755.245584 1.32771.72042 1.80831.57516.5099 1.31483.7951 2.08308.8033h5.03708c.322 0 .58334-.2614.58334-.5834 0-.1545-.06125-.3027-.17092-.4124-.10908-.1096-.25783-.1709-.41242-.1709zm10.19783 3.6843c.2316.224.6008.2176.8248-.0146.2182-.2263.2182-.5845 0-.8102L1.4956.170942C1.26402-.0530585.894767-.0466418.670767.185525c-.218167.226333-.218167.5845 0 .81025z" transform="translate(-7.001, -6.993)" fill="#ffffff" stroke="#ffffff"/></g></svg>',
+            moving: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#0078D3" stroke="#FFFFFF" stroke-width="2"/><g transform="rotate({ROT})"><path d="M12.7398 12.9976 7.13979.397574C7.07728.282418 6.98484.186269 6.87223.11927 6.75962.0522714 6.63102.0169067 6.49999.0169067S6.24036.0522714 6.12775.11927c-.11261.066999-.20504.163148-.26756.278304L.260191 12.9976c-.058574.1318-.074988.2785-.046995.42.027993.1416.099025.271.203379.3706s.236934.1645.379601.1859c.142667.0213.288454-.0019.417414-.0665l5.2864-2.6432 5.28641 2.6432c.129.0646.2747.0878.4174.0665.1427-.0214.2753-.0863.3796-.1859.1044-.0996.1754-.229.2034-.3706.028-.1415.0116-.2882-.047-.42" transform="translate(-6.30011, -6.98244)" fill="#FFFFFF" stroke="#FFFFFF"/></g></g></svg>',
+            stoppedAtHome: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#0078D3" stroke="#FFFFFF" stroke-width="2"/><path d="M19.34 14.693a1.9 1.9 0 0 0-.717.118c-.965.35-1.425 1.337-1.074 2.302a1.9 1.9 0 0 0 .28.512l-1.07 1.54a1.8 1.8 0 0 0-1.185.032c-.965.351-1.423 1.338-1.072 2.303.336.927 1.26 1.384 2.187 1.107l1.487 1.903c-.4.468-.53 1.123-.295 1.77.35.964 1.338 1.424 2.303 1.072.795-.29 1.246-1.01 1.183-1.795l2.06-.75c.457.642 1.268.904 2.063.615.965-.35 1.425-1.338 1.073-2.303-.244-.672-.797-1.1-1.436-1.178l-.082-2.369c.937-.362 1.38-1.335 1.033-2.287-.35-.965-1.336-1.423-2.3-1.072a1.8 1.8 0 0 0-.928.732l-1.81-.492a1.9 1.9 0 0 0-.114-.57c-.264-.724-.885-1.163-1.586-1.19m1.441 2.754 1.809.492q.01.286.113.577c.229.63.73 1.042 1.318 1.156l.084 2.44c-.698.322-1.088.997-1.029 1.73l-2.06.75c-.44-.619-1.208-.884-1.975-.643l-1.475-1.888c.414-.47.551-1.134.313-1.79a1.9 1.9 0 0 0-.283-.515l1.07-1.537c.366.118.778.115 1.186-.033s.725-.412.93-.739" transform="translate(-21, -21)" fill="#FFFFFF" stroke="#FFFFFF"/></g></svg>',
+            stopped: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><g transform="translate(16,16)"><circle cx="0" cy="0" r="14" fill="#0078D3" stroke="#FFFFFF" stroke-width="2"/><path d="M0 1.25C0 .835786.335786.5.75.5h7.5c.41421 0 .75.335786.75.75v7.5c0 .41421-.33579.75-.75.75H.75C.335786 9.5 0 9.16421 0 8.75z" transform="translate(-4.5, -4.5)" fill="#FFFFFF" stroke="#FFFFFF"/></g></svg>'
+        };
+
+        // Rumbo (grados desde el norte, sentido horario) entre dos posiciones
+        function icon_bearingBetween(lat1, lon1, lat2, lon2) {
+            const toRad = d => d * Math.PI / 180;
+            const dLon = toRad(lon2 - lon1);
+            const y = Math.sin(dLon) * Math.cos(toRad(lat2));
+            const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                      Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        }
+
+        // Distancia aproximada en metros (suficiente para descartar el ruido del GPS)
+        function icon_distanceM(lat1, lon1, lat2, lon2) {
+            const k = 111320;
+            const dx = (lon2 - lon1) * k * Math.cos(lat1 * Math.PI / 180);
+            const dy = (lat2 - lat1) * k;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        // Memoria entre redibujos, por cámara: última posición, rumbo y desde cuándo está detenida.
+        // Surfsight no informa rumbo: se calcula con el desplazamiento entre refrescos.
+        const icon_track = {};
+
+        // ====== POSICIÓN MÁS RECIENTE ======
+        // Candidatas: la de la cámara (fecha del último reporte) y la del GO asociado
+        // (DeviceStatusInfo.dateTime). Se usa la más nueva; a igual fecha, la de la cámara.
+        function pos_time(dateString) {
+            const ms = dateString ? new Date(dateString).getTime() : NaN;
+            return isNaN(ms) ? -Infinity : ms;
+        }
+
+        function pos_resolve(device) {
+            const candidates = [];
+            if (device.lat && device.lon) {
+                candidates.push({
+                    src: 'CAM',
+                    lat: parseFloat(device.lat),
+                    lon: parseFloat(device.lon),
+                    time: pos_time(device.lastSeenOnline),
+                    dateString: device.lastSeenOnline,
+                    speed: device.speed,
+                    bearing: device.bearing
+                });
+            }
+            const go = device.goStatus;
+            if (go && go.lat && go.lon) {
+                candidates.push({
+                    src: 'GO',
+                    lat: parseFloat(go.lat),
+                    lon: parseFloat(go.lon),
+                    time: pos_time(go.dateTime),
+                    dateString: go.dateTime,
+                    speed: go.speed,
+                    bearing: go.bearing
+                });
+            }
+            if (candidates.length === 0) return null;
+            return candidates.reduce((best, c) => c.time > best.time ? c : best);
+        }
+
+        // Devuelve { state, bearing } para un equipo según su posición elegida (pos_resolve)
+        // y actualiza su memoria
+        function icon_resolve(key, pos, nowMs) {
+            const t = icon_track[key] || (icon_track[key] = {});
+            const lat = pos.lat;
+            const lon = pos.lon;
+            const reportMs = pos.time === -Infinity ? NaN : pos.time;
+            const isMoving = Number(pos.speed) > 0;
+
+            // Rumbo: el que informe la fuente (DeviceStatusInfo del GO); si no, por desplazamiento
+            if (typeof pos.bearing === 'number' && pos.bearing >= 0) {
+                t.bearing = pos.bearing;
+            } else if (t.lat != null && icon_distanceM(t.lat, t.lon, lat, lon) > 15) {
+                t.bearing = icon_bearingBetween(t.lat, t.lon, lat, lon);
+            }
+            t.lat = lat;
+            t.lon = lon;
+
+            // Desde cuándo está detenido: lo que observamos, o la fecha del último reporte si es anterior
+            if (isMoving) {
+                t.stoppedSince = null;
+            } else {
+                const since = t.stoppedSince || nowMs;
+                t.stoppedSince = isNaN(reportMs) ? since : Math.min(since, reportMs);
+            }
+
+            let state;
+            if (isNaN(reportMs) || nowMs - reportMs > ICON_INACTIVE_MS) state = 'inactive';
+            else if (isMoving) state = 'moving';
+            else if (nowMs - t.stoppedSince > ICON_HOME_MS) state = 'stoppedAtHome';
+            else state = 'stopped';
+
+            return { state, bearing: t.bearing || 0 };
+        }
+
+        // ====== ETIQUETA "UNIDAD (CONDUCTOR)" ======
+        // Va dentro del mismo SVG que el ícono (marker_get): el SVG mide el doble del ancho
+        // necesario y se centra en el equipo; el recuadro arranca a la derecha del ícono.
+        const LABEL_FONT = "600 12px 'Segoe UI', Roboto, Arial, sans-serif";
+        const LABEL_HEIGHT = 22;
+        const LABEL_GAP = ICON_SIZE / 2 + 4;
+        let label_ctx = null;
+
+        function label_textWidth(text) {
+            try {
+                if (!label_ctx) label_ctx = document.createElement('canvas').getContext('2d');
+                label_ctx.font = LABEL_FONT;
+                return Math.ceil(label_ctx.measureText(text).width);
+            } catch (e) {
+                return Math.ceil(text.length * 7);
+            }
+        }
+
+        function label_escape(s) {
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+
+        // Ícono + etiqueta en UN solo SVG, para que se muevan juntos. Mismo ancho que la etiqueta,
+        // con el ícono centrado (el centro del marker es la posición del equipo).
+        const marker_uriCache = {};
+        function marker_get(state, bearing, labelText) {
+            const rot = state === 'moving' ? (Math.round((bearing || 0) / 5) * 5) % 360 : 0;
+            const key = `${state}:${rot}:${labelText}`;
+            if (marker_uriCache[key]) return marker_uriCache[key];
+
+            const boxW = label_textWidth(labelText) + 14;
+            const half = LABEL_GAP + boxW + 2;
+            const width = half * 2;
+            const height = Math.max(ICON_SIZE, LABEL_HEIGHT);
+            const boxY = (height - LABEL_HEIGHT) / 2;
+            const iconSvg = ICON_SVG[state].replace('{ROT}', rot)
+                .replace('<svg xmlns="http://www.w3.org/2000/svg" ', `<svg x="${half - ICON_SIZE / 2}" y="${(height - ICON_SIZE) / 2}" `);
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+                `<rect x="${half + LABEL_GAP}" y="${boxY + 1}" width="${boxW}" height="${LABEL_HEIGHT - 2}" rx="4" ry="4" fill="#ffffff" stroke="#c4cdd5" stroke-width="1"/>` +
+                `<text x="${half + LABEL_GAP + 7}" y="${boxY + LABEL_HEIGHT / 2 + 4}" font-family="'Segoe UI', Roboto, Arial, sans-serif" font-size="12" font-weight="600" fill="#25477b">${label_escape(labelText)}</text>` +
+                iconSvg +
+                `</svg>`;
+            marker_uriCache[key] = {
+                uri: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg),
+                width,
+                height
+            };
+            return marker_uriCache[key];
+        }
+
+        // Nombre del conductor del GO asociado. Sin conductor (UnknownDriverId) o no encontrado:
+        // "Conductor desconocido". Sin GO asociado: null (no hay de dónde sacarlo).
+        function label_driverName(device) {
+            if (!device.goStatus) return null;
+            const id = device.goStatus.driverId;
+            return (id && GTB_DRIVERS[id]) || 'Conductor desconocido';
+        }
+
+        geotab.addin.srfPositions = function (elt, service) {
+            ApiHelpers.init(service);
+            let allDevices = [];
+
+            // ====== ANIMACIÓN DE POSICIÓN ======
+            // Al llegar una coordenada nueva, el ícono se desplaza desde donde está hacia ella
+            // durante ANIM_MS (el tiempo hasta el próximo redibujo). La API del mapa no permite
+            // mover un marker: en cada paso se dibuja el nuevo y se borra el anterior.
+            const ANIM_MS = 30000;          // igual al intervalo de renderAll()
+            const ANIM_STEP_MS = 1000;      // un paso por segundo
+            const ANIM_MAX_JUMP_M = 10000;  // saltos mayores (ej. vuelve tras horas sin datos): sin animación
+            // key (imei) -> { pos, from, to, startMs, look, items[] }
+            const anim_entries = {};
+
+            function anim_clearEntry(e) {
+                e.items.forEach(item => { try { item.remove(); } catch (err) { /* ya no existe */ } });
+                e.items = [];
+            }
+
+            // Dibuja ícono + etiqueta de un equipo en su posición actual (e.pos)
+            function anim_drawEntry(e) {
+                const { device, icon, labelText } = e.look;
+                const center = { lat: e.pos.lat, lng: e.pos.lng };
+                const items = [];
+
+                let marker;
+                try {
+                    const m = marker_get(icon.state, icon.bearing, labelText);
+                    // marker() ancla la imagen por su esquina superior izquierda: dx/dy la centran
+                    // en la posición (así lo hace el ejemplo oficial de Geotab, sdk-map-addin-samples)
+                    marker = service.canvas.marker(center, m.width, m.height, m.uri, 10)
+                        .change({ "dx": -m.width / 2, "dy": -m.height / 2 });
+                } catch (err) {
+                    // Respaldo: si el mapa no acepta el ícono, se dibuja un círculo
+                    console.error("[MAP] No se pudo dibujar el ícono, uso círculo:", err);
+                    const color = icon.state === 'inactive' ? '#66788C' : '#0078D3';
+                    marker = service.canvas.circle(center, 12, 10)
+                        .change({ "fill": color, "fill-opacity": 0.9, "stroke": "#ffffff", "stroke-width": 2 });
+                }
+
+                marker
+                    .attach("over", function (coords) {
+                        const pos = device.pos || {};
+                        const speed = pos.speed ? Math.ceil(pos.speed) : '0';
+                        service.tooltip.showAt(
+                            coords,
+                            {
+                                main: device.name,
+                                secondary: [
+                                    ICON_LABELS[icon.state],
+                                    getStatusDisplay(device.status),
+                                    formatDeviceDate(pos.dateString),
+                                    speed + " km/h",
+                                    pos.src === 'GO' ? 'Datos del GO (más recientes)' : 'Datos de la cámara'
+                                ]
+                            },
+                            1
+                        );
+                    })
+                    .attach("out", function () {
+                        service.tooltip.hide();
+                    });
+                items.push(marker);
+
+                // Primero se dibuja lo nuevo y después se borra lo viejo: evita el parpadeo
+                anim_clearEntry(e);
+                e.items = items;
+            }
+
+            // Avanza las animaciones en curso
+            function anim_tick() {
+                const now = Date.now();
+                Object.values(anim_entries).forEach(e => {
+                    if (e.pos.lat === e.to.lat && e.pos.lng === e.to.lng) return;
+                    const p = Math.min(1, (now - e.startMs) / ANIM_MS);
+                    e.pos = p >= 1 ? e.to : {
+                        lat: e.from.lat + (e.to.lat - e.from.lat) * p,
+                        lng: e.from.lng + (e.to.lng - e.from.lng) * p
+                    };
+                    anim_drawEntry(e);
+                });
+            }
+            setInterval(anim_tick, ANIM_STEP_MS);
+            let currentFilter = 'all';
+            let currentSearch = '';
+
+            const statusMap = {
+                'offline': 'Sin comunicación',
+                'online': 'Comunicando',
+                'standby': 'En espera'
+            };
+
+            function formatDeviceDate(dateString) {
+                if (!dateString) return 'N/A';
+                try {
+                    const date = new Date(dateString);
+                    if (isNaN(date.getTime())) return 'N/A';
+                    const formatter = new Intl.DateTimeFormat('es-AR', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                        timeZone: 'America/Argentina/Buenos_Aires'
+                    });
+                    return formatter.format(date);
+                } catch (e) {
+                    return 'N/A';
+                }
+            }
+
+            function getStatusDisplay(status) {
+                return statusMap[status] || status;
+            }
+
+            function drawDevices(devices) {
+//--------------------------------------------------- JM ----------------------------------------------------------------
+//devices
+                let combinedDevices = devices;
+                dbg("Devices enqued:", devices.length);
+
+                // Construir mapa serialNumber->gtbId para asociar cada device con su GO
+                const serialToId = {};
+                const nameToId = {};
+                const plateToId = {};
+                // Patente normalizada: sin espacios ni guiones, en mayúsculas ("AI 367 ZW" == "AI367ZW")
+                const normPlate = p => String(p).replace(/[\s-]/g, '').toUpperCase();
+                Object.values(GTB_DEVICES).forEach(device => {
+                    serialToId[device.sn] = device.id;
+                    if (device.name) nameToId[device.name.trim().toLowerCase()] = device.id;
+                    if (device.licensePlate) plateToId[normPlate(device.licensePlate)] = device.id;
+                });
+
+                // Asignar gtbId a cada device usando el sn (serialNumber del GO asociado)
+                // y mostrar el nombre del Device de Geotab en lugar del SN / modelo
+                combinedDevices.forEach(device => {
+                    // SRF puede haber llegado antes que los DeviceMappings: completar el sn del GO acá
+                    if (!device.sn && device.imei && mkp_snMap[device.imei]) {
+                        device.sn = mkp_snMap[device.imei];
+                    }
+                    device.gtbId = serialToId[device.sn] ?? null;
+                    // Respaldo: si no hay mapping, asociar por nombre (cámara nombrada igual que el vehículo)
+                    if (!device.gtbId && device.name) {
+                        device.gtbId = nameToId[device.name.trim().toLowerCase()] ?? null;
+                        if (device.gtbId) device.gtbMatch = 'name';
+                    }
+                    // Respaldo 2: el nombre de la cámara es la patente del vehículo en Geotab
+                    if (!device.gtbId && device.name) {
+                        device.gtbId = plateToId[normPlate(device.name)] ?? null;
+                        if (device.gtbId) device.gtbMatch = 'plate';
+                    }
+                    const gtbDevice = device.gtbId ? GTB_DEVICES[device.gtbId] : null;
+                    if (gtbDevice && gtbDevice.name) {
+                        device.name = gtbDevice.name;
+                    }
+                });
+
+                // FILTRO DE COMUNICACIÓN (solo para el mapa): se dibujan los equipos cuyo GO tenga
+                // isDeviceCommunicating === false. Los que comunican ya los muestra el mapa nativo.
+                // device.mapState indica por qué se dibuja o no (lo muestra el panel):
+                //   'onMap'  -> GO no comunica, se dibuja
+                //   'goLive' -> GO comunica, lo muestra MyGeotab
+                //   'noGo'     -> no se pudo asociar a un GO: no se dibuja
+                //   'noStatus' -> hay GO pero no tenemos su DeviceStatusInfo: no se dibuja
+                combinedDevices.forEach(device => {
+                    const statusInfo = device.gtbId ? GTB_STATUSINFO[device.gtbId] : null;
+                    device.goStatus = statusInfo || null;
+                    if (!device.gtbId) {
+                        device.mapState = 'noGo';
+                    } else if (!statusInfo) {
+                        device.mapState = 'noStatus';
+                    } else if (statusInfo.communicates === false) {
+                        device.mapState = 'onMap';
+                    } else {
+                        device.mapState = 'goLive';
+                    }
+                    // Posición a usar: la más reciente entre cámara y GO
+                    device.pos = pos_resolve(device);
+                    // Si el GO es más nuevo, también se usan sus demás datos (estado, fecha, velocidad).
+                    // Los de la cámara quedan en device.cam.
+                    device.dataSrc = device.pos ? device.pos.src : 'CAM';
+                    if (device.dataSrc === 'GO') {
+                        device.cam = { status: device.status, lastSeenOnline: device.lastSeenOnline, speed: device.speed };
+                        device.status = device.goStatus.communicates ? 'online' : 'offline';
+                        device.lastSeenOnline = device.goStatus.dateTime;
+                        device.speed = device.goStatus.speed;
+                    }
+                });
+
+                // El panel lista TODAS las cámaras encontradas; el mapa solo las 'onMap'
+                allDevices = combinedDevices;
+                devices = combinedDevices.filter(device => device.mapState === 'onMap');
+                dbg("Devices printed (no comunicando):", devices.length);
+
+                // DIAGNÓSTICO: por qué se dibuja o no cada cámara
+                const stateCounts = {};
+                combinedDevices.forEach(d => { stateCounts[d.mapState] = (stateCounts[d.mapState] || 0) + 1; });
+                dbg("[RENDER] mapState:", JSON.stringify(stateCounts),
+                    "| GTB_DEVICES:", Object.keys(GTB_DEVICES).length,
+                    "| GTB_STATUSINFO:", Object.keys(GTB_STATUSINFO).length,
+                    "| onMap con posición:", devices.filter(d => d.pos).length,
+                    "(GO más reciente:", devices.filter(d => d.pos && d.pos.src === 'GO').length + ")");
+                DEBUG && console.table(combinedDevices.map(d => ({
+                    name: d.name, source: d.source, imei: d.imei, sn: d.sn, gtbId: d.gtbId, match: d.gtbMatch || (d.gtbId ? 'sn' : '-'),
+                    communicates: d.goStatus ? d.goStatus.communicates : '(sin status)',
+                    mapState: d.mapState, camLat: d.lat, camLon: d.lon, camTime: d.lastSeenOnline,
+                    goTime: d.goStatus ? d.goStatus.dateTime : null, pos: d.pos ? d.pos.src : '-'
+                })));
+
+//--------------------------------------------------- JM ----------------------------------------------------------------
+                // Se reconcilia contra lo ya dibujado: los equipos que siguen se animan hacia
+                // su nueva posición; los nuevos aparecen; los que ya no están se borran.
+                const nowMs = Date.now();
+                const seen = new Set();
+                devices.forEach(device => {
+                    const pos = device.pos;
+                    if (!pos) {
+                        return;
+                    }
+
+                    const key = device.imei || device.name;
+                    seen.add(key);
+                    const icon = icon_resolve(key, pos, nowMs);
+                    device.mapIcon = icon.state;
+                    const target = { lat: pos.lat, lng: pos.lon };
+                    const driverName = label_driverName(device);
+
+                    let e = anim_entries[key];
+                    if (!e) {
+                        e = anim_entries[key] = { pos: target, from: target, to: target, startMs: nowMs, items: [] };
+                    } else if (e.to.lat !== target.lat || e.to.lng !== target.lng) {
+                        const far = icon_distanceM(e.pos.lat, e.pos.lng, target.lat, target.lng) > ANIM_MAX_JUMP_M;
+                        e.from = far ? target : e.pos;
+                        e.to = target;
+                        e.startMs = nowMs;
+                        if (far) e.pos = target;
+                    }
+                    e.look = {
+                        device,
+                        icon,
+                        labelText: driverName ? `${device.name} (${driverName})` : device.name
+                    };
+                    // Redibujo con el estado actual (ícono, rumbo, etiqueta); la posición la avanza anim_tick
+                    anim_drawEntry(e);
+                });
+
+                Object.keys(anim_entries).forEach(key => {
+                    if (!seen.has(key)) {
+                        anim_clearEntry(anim_entries[key]);
+                        delete anim_entries[key];
+                    }
+                });
+            }
+
+            function groupDevicesByStatus(devices) {
+                const groups = {
+                    'online': [],
+                    'standby': [],
+                    'offline': []
+                };
+
+                devices.forEach(device => {
+                    if (groups[device.status]) {
+                        groups[device.status].push(device);
+                    }
+                });
+
+                return groups;
+            }
+
+            function filterDevices(devices) {
+                let filtered = devices;
+
+                if (currentFilter !== 'all') {
+                    filtered = filtered.filter(d => d.status === currentFilter);
+                }
+
+                if (currentSearch.trim()) {
+                    const search = currentSearch.trim().toLowerCase();
+                    filtered = filtered.filter(d => d.name.toLowerCase().includes(search));
+                }
+
+                return filtered;
+            }
+
+            function renderDevicesList(devices) {
+                const container = elt.querySelector("#srf-devices-container");
+                const filtered = filterDevices(devices);
+                const grouped = groupDevicesByStatus(filtered);
+
+                container.innerHTML = '';
+
+                if (filtered.length === 0) {
+                    container.innerHTML = '<div style="padding:16px; text-align:center; color:#999; font-size:12px;">No hay dispositivos</div>';
+                    return;
+                }
+
+                ['online', 'standby', 'offline'].forEach(status => {
+                    const devicesInGroup = grouped[status];
+                    if (devicesInGroup.length === 0) return;
+
+                    const groupTitle = document.createElement('div');
+                    groupTitle.style.fontWeight = '700';
+                    groupTitle.style.fontSize = '11px';
+                    groupTitle.style.color = '#6b7280';
+                    groupTitle.style.textTransform = 'uppercase';
+                    groupTitle.style.padding = '10px 12px';
+                    groupTitle.style.background = '#f3f4f6';
+                    groupTitle.style.borderLeft = '3px solid #3b82f6';
+                    groupTitle.style.marginBottom = '10px';
+                    groupTitle.style.cursor = 'pointer';
+                    groupTitle.style.userSelect = 'none';
+                    groupTitle.style.letterSpacing = '0.5px';
+                    groupTitle.textContent = `${getStatusDisplay(status)} (${devicesInGroup.length})`;
+                    container.appendChild(groupTitle);
+
+                    devicesInGroup.forEach(device => {
+                        const row = document.createElement('div');
+                        row.style.padding = '12px';
+                        row.style.background = 'white';
+                        row.style.border = '1px solid #e5e7eb';
+                        row.style.borderRadius = '6px';
+                        row.style.marginBottom = '8px';
+                        row.style.cursor = 'pointer';
+                        row.style.transition = 'all 0.2s';
+
+                        const speed = device.speed ? Math.ceil(device.speed) : '0';
+                        const dateFormatted = formatDeviceDate(device.lastSeenOnline);
+
+                        let badgeStyle = '';
+                        if (device.status === 'online') {
+                            badgeStyle = 'background:#d1fae5; color:#065f46;';
+                        } else if (device.status === 'offline') {
+                            badgeStyle = 'background:#f3f4f6; color:#6b7280;';
+                        } else if (device.status === 'standby') {
+                            badgeStyle = 'background:#fef08a; color:#854d0e;';
+                        }
+
+                        // Posición para centrar:
+                        //   - GO comunicando: la del GO (es el ícono que muestra el mapa nativo)
+                        //   - si no: la más reciente entre cámara y GO (device.pos)
+                        const goStatus = device.goStatus;
+                        const goHasLocation = !!(goStatus && goStatus.lat && goStatus.lon);
+                        const pos = device.mapState === 'goLive' && goHasLocation
+                            ? { src: 'GO', lat: goStatus.lat, lon: goStatus.lon }
+                            : device.pos;
+                        const target = pos ? { lat: pos.lat, lon: pos.lon } : null;
+
+                        const locationStatus = !pos ? '✗ Ubicación no disponible'
+                                             : pos.src === 'CAM' ? '✓ Ubicación de la cámara'
+                                             : device.mapState === 'goLive' ? '✓ Ubicación del GO'
+                                             : (device.lat && device.lon) ? '✓ Ubicación del GO (más reciente que la cámara)'
+                                             : '✓ Ubicación del GO (cámara sin posición)';
+                        const locationStyle = target ? 'color:#065f46;' : 'color:#dc2626;';
+
+                        // Badge de visibilidad en el mapa
+                        const mapBadge = device.mapState === 'onMap' ? { text: 'En mapa', style: 'background:#fee2e2; color:#991b1b;' }
+                                       : device.mapState === 'goLive' ? { text: 'GO comunicando', style: 'background:#e0f2fe; color:#075985;' }
+                                       : device.mapState === 'noStatus' ? { text: 'Sin estado del GO', style: 'background:#fef3c7; color:#92400e;' }
+                                       : { text: 'Sin GO asociado', style: 'background:#f3f4f6; color:#6b7280;' };
+
+                        // Badge de fuente (SRF / MKP / FCS)
+                        const sourceBadgeColor = device.source === 'FCS' ? '#dbeafe; color:#1e40af;' :
+                                                 device.source === 'MKP' ? '#ede9fe; color:#5b21b6;' :
+                                                 '#fef9c3; color:#713f12;';
+
+                        row.innerHTML = `
+                            <div style="font-weight:700; font-size:14px; color:#1f2937; margin-bottom:8px; letter-spacing:-0.3px;">${device.name}</div>
+                            <div style="font-size:12px; color:#6b7280; line-height:1.6;">
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; ${badgeStyle}">${getStatusDisplay(device.status)}</span>
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; margin-right:6px; letter-spacing:0.3px; background:${sourceBadgeColor}">${device.source || 'SRF'}</span>
+                                <span style="display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:600; letter-spacing:0.3px; ${mapBadge.style}">${mapBadge.text}</span><br>
+                                ${label_driverName(device) ? `<strong style="color:#374151; font-weight:600;">Conductor:</strong> ${label_escape(label_driverName(device))}<br>` : ''}
+                                <strong style="color:#374151; font-weight:600;">Última comunicación${device.dataSrc === 'GO' ? ' (GO)' : ''}:</strong> ${dateFormatted}<br>
+                                <strong style="color:#374151; font-weight:600;">Velocidad ${device.dataSrc === 'GO' ? 'del GO' : 'de Cámara'}:</strong> ${speed} km/h<br>
+                                <span style="font-size:11px; ${locationStyle}">${locationStatus}</span>
+                            </div>
+                        `;
+
+                        row.addEventListener('mouseenter', () => {
+                            row.style.background = '#f0f4ff';
+                            row.style.borderColor = '#3b82f6';
+                            row.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.12)';
+                        });
+
+                        row.addEventListener('mouseleave', () => {
+                            if (!row.style.background.includes('fef3c7')) {
+                                row.style.background = 'white';
+                                row.style.borderColor = '#e5e7eb';
+                                row.style.boxShadow = 'none';
+                            }
+                        });
+
+                        const hasLocation = !!target;
+                        row.style.cursor = hasLocation ? 'pointer' : 'not-allowed';
+                        row.style.opacity = '1';
+
+                        if (hasLocation) {
+                            // Centra el mapa aunque el equipo no esté dibujado por el add-in
+                            row.addEventListener('click', async () => {
+                                const lat = parseFloat(target.lat);
+                                const lng = parseFloat(target.lon);
+
+                                try {
+                                    const map = service.map;
+                                    const padding = 0.02;
+                                    const bounds = {
+                                        sw: { lat: lat - padding, lng: lng - padding },
+                                        ne: { lat: lat + padding, lng: lng + padding }
+                                    };
+                                    await map.setBounds(bounds);
+                                } catch (e) {
+                                    console.error("[ERR] Error al centrar mapa:", e);
+                                }
+
+                                row.style.background = '#fef3c7';
+                                row.style.borderColor = '#fbbf24';
+                                row.style.boxShadow = '0 2px 8px rgba(251, 191, 36, 0.2)';
+                                setTimeout(() => {
+                                    row.style.background = 'white';
+                                    row.style.borderColor = '#e5e7eb';
+                                    row.style.boxShadow = 'none';
+                                }, 1500);
+                            });
+                        } else {
+                            row.style.opacity = '0.6';
+                            row.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                            });
+                        }
+
+                        container.appendChild(row);
+                    });
+                });
+            }
+
+            // Filtra el mapa nativo para mostrar solo los GO que comunican (d = conduciendo, s = detenido).
+            // Los que no comunican los dibuja el add-in con la posición de la cámara: un solo objeto por activo.
+            // Probado en MyGeotab: set + go aplica el filtro. page.get() no devuelve assetStatus después del go,
+            // por eso se aplica una sola vez al cargar y no se re-chequea (si el usuario lo cambia a mano, se respeta).
+            async function applyMapStatusFilter() {
+                try {
+                    await service.page.set("assetStatus", "!(d,s)");
+                    const state = await service.page.get();
+                    await service.page.go("map", Object.assign({}, state, { assetStatus: ["d", "s"] }));
+                    initLog("[MAP] Filtro assetStatus aplicado: solo GO comunicando");
+                } catch (err) {
+                    console.error("[MAP] No se pudo aplicar el filtro assetStatus:", err);
+                }
+            }
+
+            function setupEventListeners() {
+                const searchInput = elt.querySelector("#srf-search");
+                const filterBtns = elt.querySelectorAll("[data-filter]");
+                const testBtn = elt.querySelector("#srf-test-btn");
+
+                // Consulta manual de DeviceMappings: la respuesta va a la consola (siempre, sin depender de DEBUG)
+                testBtn.addEventListener('click', async () => {
+                    testBtn.disabled = true;
+                    testBtn.style.opacity = '0.6';
+                    testBtn.textContent = '⏳ Consultando...';
+                    const result = await mkp_testRequest();
+                    testBtn.disabled = false;
+                    testBtn.style.opacity = '1';
+                    testBtn.textContent = result.success ? '✓ DeviceMappings' : '✗ DeviceMappings';
+                    setTimeout(() => {
+                        testBtn.textContent = '🧪 DeviceMappings';
+                    }, 3000);
+                });
+
+                searchInput.addEventListener('input', (e) => {
+                    currentSearch = e.target.value;
+                    renderDevicesList(allDevices);
+                });
+
+                filterBtns.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        filterBtns.forEach(b => {
+                            b.style.background = 'white';
+                            b.style.color = '#6b7280';
+                            b.style.borderColor = '#d1d5db';
+                        });
+                        btn.style.background = '#3b82f6';
+                        btn.style.color = 'white';
+                        btn.style.borderColor = '#3b82f6';
+                        currentFilter = btn.dataset.filter;
+                        renderDevicesList(allDevices);
+                    });
+                });
+
+                searchInput.addEventListener('focus', () => {
+                    searchInput.style.outline = 'none';
+                    searchInput.style.borderColor = '#3b82f6';
+                    searchInput.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
+                });
+
+                searchInput.addEventListener('blur', () => {
+                    searchInput.style.borderColor = '#d1d5db';
+                    searchInput.style.boxShadow = 'none';
+                });
+            }
+
+            // Merge de los 3 pipelines: SRF + MKP + FCS
+            // Prioridad de deduplicación: SRF > MKP > FCS (por imei)
+            // Pipelines sin datos simplemente se ignoran.
+            function buildCombinedDevices(srf_devices, mkp_devices, fcs_devices) {
+                const seenImeis = new Set();
+                const combined = [];
+
+                // 1. SRF primero (mayor prioridad)
+                for (const d of srf_devices) {
+                    if (d.imei && seenImeis.has(d.imei)) continue;
+                    if (d.imei) seenImeis.add(d.imei);
+                    combined.push(Object.assign({}, d, { source: d.source || 'SRF' }));
+                }
+
+                // 2. MKP solo si el imei no vino de SRF
+                for (const d of mkp_devices) {
+                    if (d.imei && seenImeis.has(d.imei)) continue;
+                    if (d.imei) seenImeis.add(d.imei);
+                    combined.push(Object.assign({}, d, { source: 'MKP' }));
+                }
+
+                // 3. FCS solo si el imei no vino de SRF ni MKP
+                for (const d of fcs_devices) {
+                    if (d.imei && seenImeis.has(d.imei)) continue;
+                    if (d.imei) seenImeis.add(d.imei);
+                    combined.push(Object.assign({}, d, { source: 'FCS' }));
+                }
+
+                return combined;
+            }
+
+            // Última lista de SRF obtenida; el redibujo la combina con MKP y FCS
+            let srf_lastDevices = [];
+            // Mensaje de error de SRF a mostrar en el status (null = SRF OK)
+            let srf_statusError = null;
+
+            // Solo trae datos de SRF; el mapa y el panel se redibujan en renderAll()
+            async function srf_refreshData(orgIdsData) {
+                try {
+                    if (!srf_isTokenValid) {
+                        srf_statusError = "Token SRF inválido";
+                        if (!srf_tokenCheckTimeoutId) {
+                            srf_scheduleTokenRetry();
+                        }
+                        srf_lastDevices = [];
+                        return;
+                    }
+
+                    let srf_devices = await srf_getSurfsightDevices(orgIdsData);
+                    srf_lastDevices = srf_devices.map(device => {
+                        if (device.imei && mkp_snMap[device.imei]) {
+                            device.sn = mkp_snMap[device.imei];
+                        }
+                        return device;
+                    });
+                    srf_statusError = null;
+                    dbg(`[SRF] Refresh: ${srf_lastDevices.length} OK`);
+                } catch (err) {
+                    console.error("[SRF]", err);
+                    srf_lastDevices = [];
+                    if (err.message === "TokenInvalid") {
+                        srf_isTokenValid = false;
+                        srf_statusError = "Token SRF inválido";
+                        if (!srf_tokenCheckTimeoutId) {
+                            srf_scheduleTokenRetry();
+                        }
+                    } else {
+                        srf_statusError = "Error en SRF";
+                    }
+                }
+            }
+
+            // REDIBUJO: combina SRF + MKP + FCS y actualiza mapa, panel y status (cada 30s)
+            function renderAll() {
+                const statusEl = elt.querySelector("#srf-status");
+                try {
+                    const srf_devices = srf_lastDevices;
+                    const combinedDevices = buildCombinedDevices(srf_devices, mkp_allDevices, fcs_allDevices);
+
+                    drawDevices(combinedDevices);
+                    renderDevicesList(allDevices);
+
+                    // Contadores centralizados en el pie del panel (sobre la lista combinada, sin duplicados)
+                    const countBy = pred => allDevices.filter(pred).length;
+                    elt.querySelector("#srf-count-total").textContent = allDevices.length;
+                    elt.querySelector("#srf-count-map").textContent = countBy(d => d.mapState === 'onMap');
+                    elt.querySelector("#srf-count-live").textContent = countBy(d => d.mapState === 'goLive');
+                    const noGo = countBy(d => d.mapState === 'noGo');
+                    const noStatus = countBy(d => d.mapState === 'noStatus');
+                    elt.querySelector("#srf-source-counts").textContent =
+                        `SRF ${countBy(d => (d.source || 'SRF') === 'SRF')} · MKP ${countBy(d => d.source === 'MKP')} · FCS ${countBy(d => d.source === 'FCS')}` +
+                        (noGo > 0 ? ` · ${noGo} sin GO asociado` : '') +
+                        (noStatus > 0 ? ` · ${noStatus} sin estado del GO` : '');
+
+                    const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+                    if (combinedDevices.length === 0) {
+                        statusEl.textContent = srf_statusError
+                            ? `⚠ ${srf_statusError} - sin datos MKP/FCS (${timeStr})`
+                            : `✗ No hay dispositivos disponibles (${timeStr})`;
+                        statusEl.classList.add("srf-error");
+                        return;
+                    }
+
+                    statusEl.textContent = srf_statusError
+                        ? `✓ Actualizado a las ${timeStr} (sin SRF: ${srf_statusError})`
+                        : `✓ Actualizado a las ${timeStr}`;
+                    statusEl.classList.remove("srf-error");
+                } catch (err) {
+                    console.error("[RENDER]", err);
+                    statusEl.textContent = `✗ ${err.message}`;
+                    statusEl.classList.add("srf-error");
+                }
+            }
+
+            elt.style.width = '100%';
+            elt.style.height = '100%';
+            elt.style.overflow = 'hidden';
+            elt.innerHTML = `
+                <div style="display:flex; height:100%; width:100%; font-family:'Segoe UI',Roboto,Arial,sans-serif; color:#333; background:#ffffff;">
+                  <div id="srf-panel" style="width:430px; height:800px; background:#ffffff; border-right:1px solid #e5e7eb; display:flex; flex-direction:column; box-shadow:2px 0 8px rgba(0,0,0,0.08);">
+                    <div id="srf-header" style="padding:20px; border-bottom:1px solid #e5e7eb; background:#f9fafb;">
+                      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                        <h3 style="font-size:18px; font-weight:700; color:#1f2937; letter-spacing:-0.5px; margin:0;">Cameras Positions</h3>
+                        <button id="srf-test-btn" title="Consulta DeviceMappings y muestra la respuesta en la consola" style="padding:4px 8px; border:1px solid #8b5cf6; background:#8b5cf6; color:white; border-radius:4px; font-size:11px; font-weight:500; cursor:pointer;">🧪 DeviceMappings</button>
+                      </div>
+                      <input type="text" id="srf-search" placeholder="Buscar por nombre..." style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; margin-bottom:12px; background:white; color:#1f2937; box-sizing:border-box;">
+                      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button class="srf-filter-btn-all" data-filter="all" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:#3b82f6; color:white; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s; border-color:#3b82f6;">Todos</button>
+                        <button class="srf-filter-btn-other" data-filter="online" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En línea</button>
+                        <button class="srf-filter-btn-other" data-filter="standby" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">En espera</button>
+                        <button class="srf-filter-btn-other" data-filter="offline" style="flex:1; min-width:70px; padding:8px 12px; border:1px solid #d1d5db; background:white; color:#6b7280; border-radius:6px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.2s;">Offline</button>
+                      </div>
+                    </div>
+                    <div id="srf-devices-container" style="flex:1; min-height:0; overflow-y:scroll; overflow-x:hidden; padding:12px; -webkit-overflow-scrolling:touch;"></div>
+                    <!-- Contadores centralizados -->
+                    <div id="srf-footer" style="padding:8px 12px; border-top:1px solid #e5e7eb; background:#f9fafb; font-size:11px; color:#4b5563;">
+                      <div style="display:flex; justify-content:space-between; gap:6px; margin-bottom:6px; text-align:center;">
+                        <div style="flex:1; background:white; border:1px solid #e5e7eb; border-radius:6px; padding:6px 4px;"><div id="srf-count-total" style="font-size:16px; font-weight:700; color:#1f2937;">0</div>Encontradas</div>
+                        <div style="flex:1; background:white; border:1px solid #e5e7eb; border-radius:6px; padding:6px 4px;"><div id="srf-count-map" style="font-size:16px; font-weight:700; color:#991b1b;">0</div>En mapa</div>
+                        <div style="flex:1; background:white; border:1px solid #e5e7eb; border-radius:6px; padding:6px 4px;"><div id="srf-count-live" style="font-size:16px; font-weight:700; color:#075985;">0</div>GO comunicando</div>
+                      </div>
+                      <div id="srf-source-counts" style="text-align:center; margin-bottom:6px;">SRF – · MKP – · FCS –</div>
+                      <div id="fcs-status" style="text-align:center; margin-bottom:6px;">FCS: Inicializando...</div>
+                      <div id="srf-status" style="padding:8px 12px; background:#ecfdf5; color:#065f46; border-radius:6px; font-size:12px; text-align:center; border:1px solid #a7f3d0; font-weight:500;">Inicializando...</div>
+                    </div>
+                  </div>
+                  <div id="srf-map" style="flex:1; background:white;"></div>
+                </div>
+            `;
+
+            ApiHelpers.getSessionPromise().then(async () => {
+                setupEventListeners();
+                applyMapStatusFilter();
+
+                // Estado de comunicación de los GO (el primer render lo espera)
+                status_start();
+
+                // SURFSIGHT PIPELINE
+                const srf_initPromise = (async () => {
+                    let orgIdsData = null;
+                    try {
+                        await srf_fetchTokenFromGitHub();
+                        orgIdsData = await srf_getOrgIdsFromGeotab();
+
+                        await srf_refreshData(orgIdsData);
+                        initLog(`[SRF] Pipeline iniciado: ${srf_lastDevices.length} cámaras (${orgIdsData.orgIdsFromCsv.length} org)`);
+                        // Solo datos: el redibujo lo hace renderAll() cada 30s
+                        srf_regularRefreshIntervalId = setInterval(() => {
+                            if (srf_isTokenValid && orgIdsData) {
+                                srf_refreshData(orgIdsData);
+                            }
+                        }, 30000);
+                    } catch (err) {
+                        console.error("[SRF] Initialization:", err.message);
+                        srf_statusError = err.message.includes("No matching OrgIds found")
+                            ? "Sin SRF Id para esta organización"
+                            : "Error en SRF";
+                    }
+                })();
+
+                // MARKETPLACE PIPELINE
+                mkp_initPromise = (async () => {
+                    try {
+                        await mkp_getDeviceMappings();
+                        await mkp_initValidDevices();
+                        mkp_refreshIntervalId = setInterval(() => {
+                            mkp_refreshData();
+                        }, 30000);
+                    } catch (err) {
+                        console.error("[MKP] Initialization failed:", err);
+                    }
+                })();
+
+                // FCS (FOCUS) PIPELINE
+                // Arranca en paralelo a SRF y MKP.
+                // Carga los nombres de dispositivos GTB primero, luego refresca posiciones via LogRecord.
+                fcs_initPromise = (async () => {
+                    try {
+                        const fcsStatusEl = elt.querySelector("#fcs-status");
+                        if (fcsStatusEl) fcsStatusEl.textContent = "FCS: Cargando dispositivos GTB...";
+
+                        // Cargar nombres GTB (también rellena GTB_DEVICES usado por el filtro de comunicación)
+                        await fcs_loadGtbDeviceNames();
+
+                        // Lista de cámaras Focus (una vez); ya no depende de DeviceMappings
+                        await fcs_loadCameras();
+
+                        await fcs_refreshData();
+
+                        if (fcsStatusEl) {
+                            const withLoc = fcs_allDevices.filter(d => d.lat && d.lon).length;
+                            fcsStatusEl.textContent = `FCS: ${fcs_allDevices.length} cámaras (${withLoc} con ubicación)`;
+                        }
+
+                        fcs_refreshIntervalId = setInterval(async () => {
+                            await fcs_refreshData();
+                            const fcsEl = elt.querySelector("#fcs-status");
+                            if (fcsEl) {
+                                const withLoc = fcs_allDevices.filter(d => d.lat && d.lon).length;
+                                fcsEl.textContent = `FCS: ${fcs_allDevices.length} cámaras (${withLoc} con ubicación)`;
+                            }
+                        }, 30000);
+
+                        initLog(`[FCS] Pipeline iniciado: ${fcs_allDevices.length} cámaras Focus`);
+                    } catch (err) {
+                        console.error("[FCS] Initialization failed:", err);
+                        const fcsStatusEl = elt.querySelector("#fcs-status");
+                        if (fcsStatusEl) fcsStatusEl.textContent = "FCS: Error al inicializar";
+                    }
+                })();
+
+                // REDIBUJO: primer dibujo cuando terminan de inicializar todos los pipelines
+                // (ok o con error), después cada 30s, haya o no SRF.
+                Promise.allSettled([status_initPromise, srf_initPromise, mkp_initPromise, fcs_initPromise]).then(() => {
+                    renderAll();
+                    render_refreshIntervalId = setInterval(renderAll, 30000);
+                    status_onCommsChange = renderAll;
+                });
+
+            }).catch(err => {
+                console.error("[Session]", err.message);
+                elt.querySelector("#srf-status").textContent = "✗ Error loading session";
+            });
+        };
+
+        getLastCommitMessage().then(() => {
+            initLog("[APP] Script loaded");
+        });
+    </script>
+</body>
+</html>
