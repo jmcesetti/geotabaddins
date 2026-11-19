@@ -25,7 +25,7 @@
     Pipelines:
         api_helpers      getSession (todos esperan a este)
         gtb_pipeline     Device + User (una vez), Zone SUPE (una vez)
-        status_pipeline  DeviceStatusInfo (30s): posición, velocidad, comunicación
+        status_pipeline  DeviceStatusInfo (15s): posición, velocidad, comunicación
         ev_pipeline      ExceptionEvent de las reglas SUPE: carga completa de LOOKBACK_HORAS
                          (cada 30 min) + incremental de los últimos 30 min (cada 60s)
         zona_pipeline    zona de cada ENTER: LogRecord del ingreso + punto en polígono
@@ -91,7 +91,7 @@
         const INCREMENTAL_MIN       = 30;     // ventana de cada refresco incremental de eventos
         const EV_REFRESH_SEG        = 60;
         const EV_RECARGA_TOTAL_MIN  = 30;     // recarga completa: descarta eventos invalidados
-        const STATUS_REFRESH_SEG    = 30;
+        const STATUS_REFRESH_SEG    = 15;
         const RENDER_REFRESH_SEG    = 30;
         // Un evento de duración sigue abierto si su activeTo llega hasta el último dato del GO
         const TOLERANCIA_ABIERTO_SEG = 300;
@@ -380,7 +380,7 @@
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        //  STATUS PIPELINE — DeviceStatusInfo (30s)
+        //  STATUS PIPELINE — DeviceStatusInfo (15s)
         // ─────────────────────────────────────────────────────────────────────
         let GTB_STATUSINFO = {};
 
@@ -779,6 +779,10 @@
 
             const etiquetaEstado = v => v.estado + (v.inferido ? '?' : '');
 
+            // GO sin comunicar: tiempo desde el último dato recibido (null si comunica o no se sabe)
+            const sinComunicarHace = v => v.communicates === false && v.lastData
+                ? formatDuracion(Date.now() - v.lastData) : null;
+
             function formatHoraCorta(ms) {
                 return new Intl.DateTimeFormat('es-AR', {
                     hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires'
@@ -885,6 +889,10 @@
                 if (v.zona) sec.push(v.zona);
                 if (v.espera) sec.push(`Espera: ${formatDuracion(v.espera.hasta - v.espera.desde)}`);
                 if (v.km != null) sec.push(`${v.km} km`);
+                if (v.communicates === false) {
+                    const hace = sinComunicarHace(v);
+                    sec.push(hace ? `Sin comunicar hace ${hace} · último dato ${formatHora(v.lastData)}` : 'GO sin comunicar');
+                }
                 return {
                     main: `Cesetti: ${etiquetaEstado(v)}${v.provisional ? ' (validando)' : ''}`,
                     secondary: sec
@@ -898,7 +906,53 @@
             const vehiculoPorId = id => vehiculos.find(v => v.id === id) || null;
             const EVENTO_MENU = "monSupeVerEnPanel";
 
+            // Posición en vivo: el mapa nativo mueve los vehículos más seguido que nuestro
+            // DeviceStatusInfo (15 s). El evento "change" de cada device trae la posición que
+            // está dibujando MyGeotab; las etiquetas y el anillo usan esa si existe.
+            // Cada posición en vivo recuerda sobre qué dato de status llegó (base): si después
+            // llega un status más nuevo, la base ya no coincide y vuelve a mandar el status.
+            const POS_VIVO = {};
+            const posBase = (lat, lon) => `${lat},${lon}`;
+            function posDe(v) {
+                const p = POS_VIVO[v.id];
+                if (p && p.base === posBase(v.lat, v.lon)) return { lat: p.lat, lng: p.lng };
+                return v.lat && v.lon ? { lat: v.lat, lng: v.lon } : null;
+            }
+
+            function alCambiarDevice(data) {
+                if (!data || data.type !== "device" || !data.entity) return;
+                const loc = data.location || (data.entity && data.entity.location);
+                if (!loc) return;
+                const lat = Number(loc.lat != null ? loc.lat : loc.latitude);
+                const lng = Number(loc.lng != null ? loc.lng : (loc.lon != null ? loc.lon : loc.longitude));
+                if (!isFinite(lat) || !isFinite(lng) || (!lat && !lng)) return;
+                const id = data.entity.id;
+                const prev = POS_VIVO[id];
+                if (prev && prev.lat === lat && prev.lng === lng) return;
+                const v = vehiculoPorId(id);
+                POS_VIVO[id] = { lat, lng, base: v ? posBase(v.lat, v.lon) : null };
+                if (v) etq_redibujarPronto();
+            }
+
+            // Cada refresco de DeviceStatusInfo: posiciones y comunicación al día sin esperar
+            // al render completo de 30 s.
+            function actualizarPosiciones() {
+                vehiculos.forEach(v => {
+                    const info = GTB_STATUSINFO[v.id];
+                    if (!info) return;
+                    v.lat = info.lat;
+                    v.lon = info.lon;
+                    v.speed = Math.round(info.speed);
+                    v.communicates = info.communicates;
+                    v.lastData = info.dateTime ? Date.parse(info.dateTime) : null;
+                });
+                dibujarEtiquetas();
+                dibujarSeleccion();
+            }
+
             function enlazarActivosNativos() {
+                service.events.attach("change", alCambiarDevice);
+
                 service.events.attach("over", data => {
                     if (!data || data.type !== "device" || !data.entity) return;
                     const v = vehiculoPorId(data.entity.id);
@@ -980,8 +1034,9 @@
             function dibujarSeleccion() {
                 if (seleccionAnillo) { seleccionAnillo.remove(); seleccionAnillo = null; }
                 const v = seleccionId ? vehiculoPorId(seleccionId) : null;
-                if (!v || !v.lat || !v.lon) return;
-                seleccionAnillo = service.canvas.circle({ lat: v.lat, lng: v.lon }, 22, 10)
+                const p = v ? posDe(v) : null;
+                if (!p) return;
+                seleccionAnillo = service.canvas.circle(p, 22, 10)
                     .change({ "fill": "#ff1fa8", "fill-opacity": 0.18, "stroke": "#ff1fa8", "stroke-width": 4 });
             }
 
@@ -1018,7 +1073,8 @@
             const ETQ_SEPARACION = 16;      // desde el centro del vehículo hasta el recuadro
             let etiquetasVisibles = true;
             try { etiquetasVisibles = localStorage.getItem(ETQ_STORAGE_KEY) !== "0"; } catch (e) { /* sin storage */ }
-            let etq_items = [];
+            const ETQ_REDIBUJO_MS = 1500;   // demora máxima entre un movimiento en vivo y el redibujo
+            let etq_items = {};             // id del device -> { marker, clave }
             let etq_ctx = null;
             let etq_cache = {};
             let etq_pausaHasta = 0;
@@ -1074,18 +1130,42 @@
                 dbg("[MAP] No se pudo escuchar los cambios de vista:", err);
             }
 
+            // Redibujo diferido para los movimientos en vivo (muchos eventos seguidos = un redibujo)
+            let etq_prontoTimer = null;
+            function etq_redibujarPronto() {
+                if (etq_prontoTimer) return;
+                etq_prontoTimer = setTimeout(() => {
+                    etq_prontoTimer = null;
+                    dibujarEtiquetas();
+                    dibujarSeleccion();
+                }, ETQ_REDIBUJO_MS);
+            }
+
+            // Solo se reemplazan los markers cuyo texto, color o posición cambió: así el
+            // redibujo es barato y puede seguir a los vehículos cada pocos segundos.
             function dibujarEtiquetas() {
                 if (Date.now() < etq_pausaHasta) { etq_pendiente = true; return; }
                 etq_pendiente = false;
-                const nuevos = [];
+                const nuevos = {};
+                const viejos = etq_items;
                 if (etiquetasVisibles) {
                     filtrar(vehiculos).forEach(v => {
-                        if (!v.lat || !v.lon) return;
+                        const p = posDe(v);
+                        if (!p) return;
                         try {
                             const cfg = ESTADOS[v.estado] || ESTADOS["Sin clasificar"];
                             const atraso = etq_atraso(v);
-                            const m = etq_svg(etq_texto(v), atraso ? ETQ_ROJO : cfg.color, atraso);
-                            const marker = service.canvas.marker({ lat: v.lat, lng: v.lon }, m.ancho, ETQ_ALTO, m.uri, 9)
+                            const color = atraso ? ETQ_ROJO : cfg.color;
+                            const texto = etq_texto(v);
+                            const clave = `${color}|${texto}|${atraso}|${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
+                            const previo = viejos[v.id];
+                            if (previo && previo.clave === clave) {
+                                nuevos[v.id] = previo;
+                                delete viejos[v.id];
+                                return;
+                            }
+                            const m = etq_svg(texto, color, atraso);
+                            const marker = service.canvas.marker(p, m.ancho, ETQ_ALTO, m.uri, 9)
                                 .change({ "dx": ETQ_SEPARACION, "dy": -ETQ_ALTO / 2 });
                             marker
                                 .attach("over", coords => {
@@ -1095,14 +1175,14 @@
                                 })
                                 .attach("out", () => service.tooltip.hide())
                                 .attach("click", () => resaltarFila(v.id));
-                            nuevos.push(marker);
+                            nuevos[v.id] = { marker, clave };
                         } catch (err) {
                             console.error("[MAP] No se pudo dibujar la etiqueta:", err);
                         }
                     });
                 }
                 // Primero lo nuevo y después se borra lo viejo: evita el parpadeo
-                etq_items.forEach(item => { try { item.remove(); } catch (e) { /* ya no existe */ } });
+                Object.values(viejos).forEach(item => { try { item.marker.remove(); } catch (e) { /* ya no existe */ } });
                 etq_items = nuevos;
             }
 
@@ -1205,7 +1285,10 @@
                         ];
                         if (v.provisional) badges.push('<span class="mon-tag mon-tag-warn" title="Menos de 20 min adentro: puede ser un paso por la geocerca">Validando</span>');
                         if (v.inferido) badges.push('<span class="mon-tag mon-tag-info" title="Zona mixta: tipo inferido por alternancia">Inferido</span>');
-                        if (v.communicates === false) badges.push('<span class="mon-tag mon-tag-off">GO sin comunicar</span>');
+                        if (v.communicates === false) {
+                            const hace = sinComunicarHace(v);
+                            badges.push(`<span class="mon-tag mon-tag-off" title="Último dato: ${esc(formatHora(v.lastData))}">GO sin comunicar${hace ? ` · hace ${esc(hace)}` : ''}</span>`);
+                        }
 
                         const kv = [];
                         const par = (k, val) => kv.push(`<dt>${k}</dt><dd>${val}</dd>`);
@@ -1224,7 +1307,6 @@
                         if (v.km != null) par('Recorrido', mono(`${v.km} km`));
                         par('Conductor', esc(nombreConductor(v.driverId)));
                         par('Velocidad', `${mono(`${v.speed} km/h`)} <span class="mon-mute">· ${mono(formatHora(v.lastData))}</span>`);
-
                         row.innerHTML = `
                             <div class="mon-row-head">
                                 <span class="mon-name">${esc(v.name)}</span>
@@ -2135,7 +2217,9 @@
                     initLog(`[APP] Monitor iniciado: ${vehiculos.length} vehículos afectados`);
                     setCargando(false);
 
-                    status_refreshIntervalId = setInterval(status_refreshData, STATUS_REFRESH_SEG * 1000);
+                    status_refreshIntervalId = setInterval(async () => {
+                        if (await status_refreshData()) actualizarPosiciones();
+                    }, STATUS_REFRESH_SEG * 1000);
                     ev_refreshIntervalId = setInterval(ev_refreshData, EV_REFRESH_SEG * 1000);
                     render_refreshIntervalId = setInterval(renderAll, RENDER_REFRESH_SEG * 1000);
                 } catch (err) {
