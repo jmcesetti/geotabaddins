@@ -19,7 +19,7 @@
 
         EXIT de una visita válida (>= 20 min) ── Carreteo ── ENTER siguiente
         SUPE_DELAY durante el Carreteo -> Demora (StandBy si pasa las 2 h)
-        Reglas de control (GAS_STATION, SHIFT, TIRESHOP, WORKSHOP) -> visita sin Espera
+        Reglas de control (GAS_STATION, SHIFT, TIRESHOP, WORKSHOP, CAR_WASH, BASE) -> visita sin Espera
         Zona mixta -> se infiere por alternancia contra la última Carga/Descarga ("Carga?")
 
     Pipelines:
@@ -57,7 +57,9 @@
             GAS_STATION: "a8BBnzEgyCEC5Znb5qNA6aQ",
             SHIFT:       "asE-Zs26ASkC3YOnuIQ37_w",
             TIRESHOP:    "aDFTkL4ASD0qWv9zHn4knTg",
-            WORKSHOP:    "atqVyt5eP8EaoRADoKstgEw"
+            WORKSHOP:    "atqVyt5eP8EaoRADoKstgEw",
+            CAR_WASH:    "a9_frKrBGyE6oKs6UR6sAYA",
+            BASE:        "a7WZXhavDvUOyXDYAqdm4Mg"
         };
 
         const ZONETYPES = {
@@ -67,7 +69,9 @@
             "b56F": "SUPE_ESTACION_SERVICIO",
             "b570": "SUPE_GOMERIA",
             "b56E": "SUPE_RELEVOS",
-            "b571": "SUPE_TALLER"
+            "b571": "SUPE_TALLER",
+            "b5C1": "SUPE_LAVADERO",
+            "b5E6": "SUPE_BASE"
         };
 
         // Reglas de control por geocerca: regla -> (zoneType, etiqueta del tramo)
@@ -75,7 +79,9 @@
             [REGLAS.GAS_STATION]: { zoneType: "SUPE_ESTACION_SERVICIO", etiqueta: "Estacion de Servicio" },
             [REGLAS.SHIFT]:       { zoneType: "SUPE_RELEVOS",           etiqueta: "Relevo" },
             [REGLAS.TIRESHOP]:    { zoneType: "SUPE_GOMERIA",           etiqueta: "Gomeria" },
-            [REGLAS.WORKSHOP]:    { zoneType: "SUPE_TALLER",            etiqueta: "Taller" }
+            [REGLAS.WORKSHOP]:    { zoneType: "SUPE_TALLER",            etiqueta: "Taller" },
+            [REGLAS.CAR_WASH]:    { zoneType: "SUPE_LAVADERO",          etiqueta: "Lavadero" },
+            [REGLAS.BASE]:        { zoneType: "SUPE_BASE",              etiqueta: "Base" }
         };
 
         const TIPO_DEFECTO               = "Carga/Descarga";
@@ -136,6 +142,8 @@
             "Relevo":               { color: "#ea580c", cat: "control" },
             "Gomeria":              { color: "#a16207", cat: "control" },
             "Taller":               { color: "#475569", cat: "control" },
+            "Lavadero":             { color: "#7c3aed", cat: "control" },
+            "Base":                 { color: "#57534e", cat: "control" },
             "Ingresando":           { color: "#94a3b8", cat: "otros" },
             "Fuera de circuito":    { color: "#9ca3af", cat: "otros" },
             "Sin clasificar":       { color: "#9ca3af", cat: "otros" }
@@ -1576,7 +1584,7 @@
                     title: `${v.name}: ${etiquetaEstado(v)} hace ${fmt(Date.now() - v.desde)}${v.km != null ? ' · ' + v.km + ' km' : ''}`
                 }));
 
-                const controles = ["Estacion de Servicio", "Relevo", "Gomeria", "Taller"];
+                const controles = Object.values(REGLAS_GEOCERCA).map(r => r.etiqueta);
                 const sinComunicar = vehiculos.filter(v => v.communicates === false).length;
 
                 return `
