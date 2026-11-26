@@ -1121,7 +1121,7 @@
             const ETQ_ROJO = "#e0213f";
             // Atrasado respecto del ETA: el atraso va en rojo y el recuadro se marca en rojo
             const etq_atraso = v => { const e = etaInfo(v); return e && e.atrasado ? ` · ${e.corto}` : ''; };
-            const etq_texto = v => etiquetaEstado(v) + (v.eta ? (etaInfo(v).atrasado ? '' : ` · ${etaInfo(v).corto}`)
+            const etq_texto = v => (v.name ? `${v.name} · ` : '') + etiquetaEstado(v) + (v.eta ? (etaInfo(v).atrasado ? '' : ` · ${etaInfo(v).corto}`)
                 : (v.desde ? ` · ${formatDuracion(Date.now() - v.desde)}` : ''));
 
             // Redibujar markers en medio de un setBounds o un arrastre hace que MyGeotab vuelva
